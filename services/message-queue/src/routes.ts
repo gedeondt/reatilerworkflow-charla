@@ -10,6 +10,14 @@ export async function routes(app: FastifyInstance) {
     const { name } = paramsName.parse(req.params);
     const body = envelopeSchema.parse(req.body);
     push(name, body);
+    app.log.info(
+      {
+        queue: name,
+        eventName: body.eventName,
+        eventId: body.eventId
+      },
+      'message enqueued'
+    );
     return { status: 'ok' };
   });
 
@@ -19,6 +27,14 @@ export async function routes(app: FastifyInstance) {
     if (!msg) {
       return { status: 'empty' };
     }
+    app.log.info(
+      {
+        queue: name,
+        eventName: msg.eventName,
+        eventId: msg.eventId
+      },
+      'message dequeued'
+    );
     return { message: msg };
   });
 }

@@ -2,8 +2,10 @@ import Fastify from 'fastify';
 import { routes } from './routes';
 
 export function buildServer() {
+  const logLevel = process.env.LOG_LEVEL ?? 'warn';
+
   const app = Fastify({
-    logger: true,
+    logger: { level: logLevel },
     requestTimeout: 5000,
     connectionTimeout: 5000
   });

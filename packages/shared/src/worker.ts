@@ -17,6 +17,7 @@ type WorkerOptions = {
   markProcessed: (eventId: string) => MaybePromise<void>;
   pollIntervalMs?: number;
   logger?: Logger;
+  quietPolling?: boolean;
 };
 
 type WorkerStatus = 'idle' | 'running';
@@ -37,7 +38,8 @@ export function startWorker({
   isProcessed,
   markProcessed,
   pollIntervalMs = 250,
-  logger
+  logger,
+  quietPolling = true
 }: WorkerOptions): WorkerController {
   let running = false;
   let status: WorkerStatus = 'idle';
@@ -93,8 +95,15 @@ export function startWorker({
             return;
           }
 
-          const nextDelay = result === 'empty' ? pollIntervalMs : 0;
-          schedule(nextDelay);
+          if (result === 'empty') {
+            if (!quietPolling) {
+              log.debug?.({ queueName }, 'queue empty');
+            }
+            schedule(pollIntervalMs);
+            return;
+          }
+
+          schedule(0);
         })
         .catch(() => {
           if (!running) {

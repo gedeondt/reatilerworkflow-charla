@@ -25,10 +25,11 @@ const worker = startWorker({
   isProcessed: (eventId) => store.has(eventId),
   markProcessed: (eventId) => store.add(eventId),
   pollIntervalMs: 250,
-  logger
+  logger,
+  quietPolling: true
 });
 
 worker.start();
 ```
 
-El controlador devuelve métodos `start`, `stop` e `isRunning` para coordinar el ciclo de vida del consumidor y facilitar su uso en tests.
+El controlador devuelve métodos `start`, `stop` e `isRunning` para coordinar el ciclo de vida del consumidor y facilitar su uso en tests. Por defecto `quietPolling` está activado para evitar logs cuando la cola está vacía, pero puede deshabilitarse si se necesita inspeccionar el polling.
