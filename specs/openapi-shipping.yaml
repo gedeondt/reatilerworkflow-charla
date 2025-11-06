@@ -1,0 +1,138 @@
+openapi: 3.0.3
+info:
+  title: Shipping Service API
+  version: 1.0.0
+paths:
+  /shipments:
+    post:
+      summary: Crea un nuevo envío para un pedido
+      operationId: createShipment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateShipmentRequest'
+      responses:
+        '201':
+          description: Envío preparado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shipment'
+  /shipments/{id}:
+    get:
+      summary: Obtiene un envío por identificador
+      operationId: getShipment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Envío encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shipment'
+  /shipments/{id}/dispatch:
+    post:
+      summary: Marca un envío como despachado
+      operationId: dispatchShipment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Despacho aceptado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShipmentActionResponse'
+components:
+  schemas:
+    Shipment:
+      type: object
+      description: Representa un envío asociado a un pedido.
+      properties:
+        shipmentId:
+          type: string
+          example: SHP-654321
+        orderId:
+          type: string
+          example: ORD-123456
+        address:
+          $ref: '#/components/schemas/Address'
+        status:
+          type: string
+          enum:
+            - PENDING
+            - PREPARED
+            - DISPATCHED
+            - FAILED
+          example: PREPARED
+      required:
+        - shipmentId
+        - orderId
+        - address
+        - status
+      additionalProperties: false
+    Address:
+      type: object
+      description: Dirección de entrega asociada al envío.
+      properties:
+        line1:
+          type: string
+          example: Calle Falsa 123
+        city:
+          type: string
+          example: Ciudad Gótica
+        zip:
+          type: string
+          example: '12345'
+        country:
+          type: string
+          example: AR
+      required:
+        - line1
+        - city
+        - zip
+        - country
+      additionalProperties: false
+    CreateShipmentRequest:
+      type: object
+      description: Solicitud para preparar un envío.
+      properties:
+        orderId:
+          type: string
+          example: ORD-123456
+        address:
+          $ref: '#/components/schemas/Address'
+      required:
+        - orderId
+        - address
+      additionalProperties: false
+    ShipmentActionResponse:
+      type: object
+      description: Respuesta a una acción sobre el envío.
+      properties:
+        shipmentId:
+          type: string
+          example: SHP-654321
+        status:
+          type: string
+          enum:
+            - PENDING
+            - PREPARED
+            - DISPATCHED
+            - FAILED
+          example: DISPATCHED
+      required:
+        - shipmentId
+        - status
+      additionalProperties: false

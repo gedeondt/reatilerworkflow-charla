@@ -1,0 +1,149 @@
+openapi: 3.0.3
+info:
+  title: Payments Service API
+  version: 1.0.0
+paths:
+  /payments/authorize:
+    post:
+      summary: Autoriza un pago asociado a un pedido
+      operationId: authorizePayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizePaymentRequest'
+      responses:
+        '201':
+          description: Pago autorizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+  /payments/capture:
+    post:
+      summary: Captura un pago previamente autorizado
+      operationId: capturePayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentActionRequest'
+      responses:
+        '202':
+          description: Captura aceptada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentActionResponse'
+  /payments/refund:
+    post:
+      summary: Solicita el reembolso de un pago
+      operationId: refundPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentActionRequest'
+      responses:
+        '202':
+          description: Reembolso aceptado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentActionResponse'
+  /payments/{id}:
+    get:
+      summary: Obtiene un pago por identificador
+      operationId: getPayment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pago encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+components:
+  schemas:
+    Payment:
+      type: object
+      description: Representa un pago asociado a un pedido.
+      properties:
+        paymentId:
+          type: string
+          example: PAY-456789
+        orderId:
+          type: string
+          example: ORD-123456
+        amount:
+          type: number
+          format: double
+          example: 149.99
+        status:
+          type: string
+          enum:
+            - PENDING
+            - AUTHORIZED
+            - CAPTURED
+            - REFUNDED
+            - FAILED
+          example: AUTHORIZED
+      required:
+        - paymentId
+        - orderId
+        - amount
+        - status
+      additionalProperties: false
+    AuthorizePaymentRequest:
+      type: object
+      description: Solicitud para autorizar un pago.
+      properties:
+        orderId:
+          type: string
+          example: ORD-123456
+        amount:
+          type: number
+          format: double
+          example: 149.99
+      required:
+        - orderId
+        - amount
+      additionalProperties: false
+    PaymentActionRequest:
+      type: object
+      description: Solicitud para ejecutar una acción sobre un pago existente.
+      properties:
+        paymentId:
+          type: string
+          example: PAY-456789
+      required:
+        - paymentId
+      additionalProperties: false
+    PaymentActionResponse:
+      type: object
+      description: Respuesta a una acción sobre un pago.
+      properties:
+        paymentId:
+          type: string
+          example: PAY-456789
+        status:
+          type: string
+          enum:
+            - PENDING
+            - AUTHORIZED
+            - CAPTURED
+            - REFUNDED
+            - FAILED
+          example: CAPTURED
+      required:
+        - paymentId
+        - status
+      additionalProperties: false
