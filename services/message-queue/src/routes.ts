@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { envelopeSchema } from './types.js';
+import { eventEnvelopeSchema } from '@reatiler/shared';
 import { push, pop } from './queue.js';
 
 export async function routes(app: FastifyInstance) {
@@ -8,7 +8,7 @@ export async function routes(app: FastifyInstance) {
 
   app.post('/queues/:name/messages', async (req) => {
     const { name } = paramsName.parse(req.params);
-    const body = envelopeSchema.parse(req.body);
+    const body = eventEnvelopeSchema.parse(req.body);
     push(name, body);
     app.log.info(
       {

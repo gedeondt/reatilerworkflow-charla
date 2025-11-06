@@ -1,38 +1,35 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { FakeEventBus } from '@reatiler/shared/event-bus';
+import { FakeEventBus, createEvent } from '@reatiler/shared';
 import type { EventEnvelope } from '@reatiler/shared';
 
 import { createReservationStore } from '../src/reservations.js';
 import { createOrderPlacedHandler, createReleaseStockHandler } from '../src/events/handlers.js';
 
-const baseEvent = (): EventEnvelope => ({
-  eventName: 'OrderPlaced',
-  version: 1,
-  eventId: 'evt-1',
-  traceId: 'trace-1',
-  correlationId: 'order-1',
-  occurredAt: new Date().toISOString(),
-  data: {
-    orderId: 'order-1',
-    lines: [
-      {
-        sku: 'SKU-1',
-        qty: 2
+const baseEvent = (): EventEnvelope =>
+  createEvent(
+    'OrderPlaced',
+    {
+      orderId: 'order-1',
+      lines: [
+        {
+          sku: 'SKU-1',
+          qty: 2
+        }
+      ],
+      amount: 199.99,
+      address: {
+        line1: 'Main St 123',
+        city: 'Metropolis',
+        zip: '12345',
+        country: 'AR'
       }
-    ],
-    amount: 199.99,
-    address: {
-      line1: 'Main St 123',
-      city: 'Metropolis',
-      zip: '12345',
-      country: 'AR'
-    }
-  }
-});
+    },
+    { traceId: 'trace-1', correlationId: 'order-1' }
+  );
 
 describe('inventory order placed handler', () => {
-  it('creates a reservation and publishes InventoryReserved', async () => {
+  it('creates a reservation and publishes InventoryReserved with propagated traces', async () => {
     const store = createReservationStore();
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -45,7 +42,8 @@ describe('inventory order placed handler', () => {
       opTimeoutMs: 1000
     });
 
-    await handler(baseEvent());
+    const incoming = baseEvent();
+    await handler(incoming);
 
     const reservation = store.findByOrderId('order-1');
     expect(reservation).not.toBeNull();
@@ -54,7 +52,9 @@ describe('inventory order placed handler', () => {
     const published = await bus.pop('payments');
     expect(published).not.toBeNull();
     expect(published?.eventName).toBe('InventoryReserved');
-    expect(published?.traceId).toBe('trace-1');
+    expect(published?.traceId).toBe(incoming.traceId);
+    expect(published?.correlationId).toBe('order-1');
+    expect(published?.causationId).toBe(incoming.eventId);
   });
 
   it('publishes InventoryReservationFailed when reservations are disabled', async () => {
@@ -95,7 +95,8 @@ describe('inventory order placed handler', () => {
       opTimeoutMs: 1000
     });
 
-    await successHandler(baseEvent());
+    const incoming = baseEvent();
+    await successHandler(incoming);
     const reservedEvent = await bus.pop('payments');
     expect(reservedEvent).not.toBeNull();
 
@@ -104,21 +105,25 @@ describe('inventory order placed handler', () => {
 
     const releaseHandler = createReleaseStockHandler({ store, bus, logger });
 
-    await releaseHandler({
-      eventName: 'ReleaseStock',
-      version: 1,
-      eventId: 'evt-2',
-      traceId: 'trace-1',
-      correlationId: 'order-1',
-      occurredAt: new Date().toISOString(),
-      data: {
+    const releaseEvent = createEvent(
+      'ReleaseStock',
+      {
         reservationId: reservation!.reservationId,
         orderId: 'order-1'
+      },
+      {
+        traceId: incoming.traceId,
+        correlationId: 'order-1',
+        causationId: incoming.eventId
       }
-    });
+    );
+
+    await releaseHandler(releaseEvent);
 
     const releasedEvent = await bus.pop('orders');
     expect(releasedEvent?.eventName).toBe('InventoryReleased');
+    expect(releasedEvent?.traceId).toBe(incoming.traceId);
+    expect(releasedEvent?.causationId).toBe(releaseEvent.eventId);
     expect(store.findByOrderId('order-1')?.status).toBe('RELEASED');
   });
 

@@ -1,30 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
-import { z } from 'zod';
-
-import type { EventBus, EventEnvelope } from '@reatiler/shared';
-import { createEventEnvelope, publishWithRetry, withTimeout } from '@reatiler/shared';
+import type { EventBus, EventEnvelope, EventName } from '@reatiler/shared';
+import {
+  createEvent,
+  logEvent,
+  parseEvent,
+  publishWithRetry,
+  withTimeout
+} from '@reatiler/shared';
 
 import type { ShipmentStore } from '../shipments.js';
-
-const AddressSchema = z
-  .object({
-    line1: z.string().min(1),
-    city: z.string().min(1),
-    zip: z.string().min(1),
-    country: z.string().min(1)
-  })
-  .strict();
-
-const PaymentAuthorizedData = z
-  .object({
-    paymentId: z.string().min(1),
-    orderId: z.string().min(1),
-    amount: z.number().positive(),
-    reservationId: z.string().min(1),
-    address: AddressSchema
-  })
-  .strict();
 
 export type Logger = {
   info: (message: unknown, ...args: unknown[]) => void;
@@ -43,6 +28,23 @@ export type CreatePaymentAuthorizedHandlerOptions = {
 
 const PAYMENTS_QUEUE = 'payments';
 
+function safeParse<N extends EventName>(
+  eventName: N,
+  event: EventEnvelope,
+  logger: Logger,
+  message: string
+) {
+  try {
+    return parseEvent(eventName, event);
+  } catch (error) {
+    logEvent(logger, event, message, {
+      level: 'warn',
+      context: { error: error instanceof Error ? error.message : error }
+    });
+    return null;
+  }
+}
+
 export function createPaymentAuthorizedHandler({
   store,
   bus,
@@ -52,27 +54,29 @@ export function createPaymentAuthorizedHandler({
   nextQueue = PAYMENTS_QUEUE
 }: CreatePaymentAuthorizedHandlerOptions) {
   return async (event: EventEnvelope) => {
-    const parsed = PaymentAuthorizedData.safeParse(event.data);
+    const parsed = safeParse('PaymentAuthorized', event, logger, 'invalid PaymentAuthorized payload received');
 
-    if (!parsed.success) {
-      logger.warn?.(
-        { eventName: event.eventName, issues: parsed.error.issues },
-        'invalid PaymentAuthorized payload received'
-      );
+    if (!parsed) {
       return;
     }
 
-    const { orderId, address, paymentId } = parsed.data;
+    const { envelope, data } = parsed;
+    const { orderId, address, paymentId, reservationId } = data;
     const existing = store.findByOrderId(orderId);
 
     if (existing) {
       if (existing.status === 'PREPARED' && allowPrepare) {
-        logger.info({ orderId }, 'shipment already prepared, skipping duplicate PaymentAuthorized');
+        logEvent(logger, envelope, 'shipment already prepared, skipping duplicate PaymentAuthorized', {
+          context: { orderId }
+        });
         return;
       }
 
       if (existing.status === 'FAILED' && !allowPrepare) {
-        logger.warn?.({ orderId }, 'shipment already failed, skipping duplicate PaymentAuthorized');
+        logEvent(logger, envelope, 'shipment already failed, skipping duplicate PaymentAuthorized', {
+          level: 'warn',
+          context: { orderId }
+        });
         return;
       }
     }
@@ -113,49 +117,61 @@ export function createPaymentAuthorizedHandler({
         });
       }
 
-      const failureEvent = createEventEnvelope({
-        eventName: 'ShipmentFailed',
-        traceId: event.traceId,
-        correlationId: orderId,
-        causationId: event.eventId,
-        data: {
+      const failureEvent = createEvent(
+        'ShipmentFailed',
+        {
           shipmentId,
           orderId,
           reason
+        },
+        {
+          traceId: envelope.traceId,
+          correlationId: orderId,
+          causationId: envelope.eventId
         }
-      });
+      );
 
-      const refundEvent = createEventEnvelope({
-        eventName: 'RefundPayment',
-        traceId: event.traceId,
-        correlationId: orderId,
-        causationId: event.eventId,
-        data: {
+      const refundEvent = createEvent(
+        'RefundPayment',
+        {
           paymentId,
           orderId,
           reason
+        },
+        {
+          traceId: envelope.traceId,
+          correlationId: orderId,
+          causationId: envelope.eventId
         }
-      });
+      );
 
       await publishWithRetry(bus, nextQueue, failureEvent, logger);
       await publishWithRetry(bus, nextQueue, refundEvent, logger);
-      logger.warn?.({ orderId, shipmentId, reason }, 'shipment preparation failed');
+
+      logEvent(logger, envelope, 'shipment preparation failed', {
+        level: 'warn',
+        context: { orderId, shipmentId, reason, reservationId }
+      });
       return;
     }
 
-    const preparedEvent = createEventEnvelope({
-      eventName: 'ShipmentPrepared',
-      traceId: event.traceId,
-      correlationId: orderId,
-      causationId: event.eventId,
-      data: {
+    const preparedEvent = createEvent(
+      'ShipmentPrepared',
+      {
         shipmentId,
         orderId,
         address
+      },
+      {
+        traceId: envelope.traceId,
+        correlationId: orderId,
+        causationId: envelope.eventId
       }
-    });
+    );
 
     await publishWithRetry(bus, nextQueue, preparedEvent, logger);
-    logger.info({ orderId, shipmentId }, 'shipment prepared');
+    logEvent(logger, envelope, 'shipment prepared', {
+      context: { orderId, shipmentId }
+    });
   };
 }

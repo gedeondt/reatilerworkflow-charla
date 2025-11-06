@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { FakeEventBus } from '@reatiler/shared/event-bus';
+import { FakeEventBus } from '@reatiler/shared';
 
 import { createDispatcher } from '../src/events/dispatcher.js';
 import { createWorker } from '../src/events/worker.js';

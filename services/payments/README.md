@@ -9,7 +9,9 @@ Servicio responsable de la orquestación de pagos.
 ## Variables de entorno
 
 - `PORT`: Puerto HTTP.
-- `MESSAGE_QUEUE_URL`: URL del servicio de colas (predeterminado `http://localhost:3005`).
+- `ALLOW_AUTH`: Habilita la autorización de pagos.
+- `WORKER_POLL_MS`: Intervalo (ms) entre polls del worker.
+- `OP_TIMEOUT_MS`: Timeout (ms) para operaciones de pagos.
 - `LOG_LEVEL`: Nivel de logging opcional.
 
 ## Ejemplo de verificación
@@ -21,5 +23,12 @@ curl http://localhost:3003/health
 Respuesta esperada:
 
 ```json
-{"status":"ok","service":"payments"}
+{
+  "status": "ok",
+  "service": "payments",
+  "worker": "up",
+  "queueName": "payments",
+  "processedCount": 0,
+  "lastEventAt": null
+}
 ```

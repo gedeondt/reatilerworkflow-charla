@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { FakeEventBus } from '@reatiler/shared/event-bus';
+import { FakeEventBus, createEvent } from '@reatiler/shared';
 import type { EventEnvelope } from '@reatiler/shared';
 
 import { createReservationStore } from '../../inventory/src/reservations.js';
@@ -41,21 +41,18 @@ const baseOrderData = {
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-const createOrderPlacedEvent = (overrides?: Partial<EventEnvelope['data']>): EventEnvelope => ({
-  eventName: 'OrderPlaced',
-  version: 1,
-  eventId: 'evt-order-1',
-  traceId: 'trace-1',
-  correlationId: 'order-1',
-  occurredAt: new Date().toISOString(),
-  data: {
-    orderId: 'order-1',
-    lines: baseOrderData.lines,
-    amount: baseOrderData.amount,
-    address: baseOrderData.address,
-    ...(overrides as Record<string, unknown> | undefined)
-  }
-});
+const createOrderPlacedEvent = (overrides?: Partial<EventEnvelope['data']>): EventEnvelope =>
+  createEvent(
+    'OrderPlaced',
+    {
+      orderId: 'order-1',
+      lines: baseOrderData.lines,
+      amount: baseOrderData.amount,
+      address: baseOrderData.address,
+      ...(overrides as Record<string, unknown> | undefined)
+    },
+    { traceId: 'trace-1', correlationId: 'order-1' }
+  );
 
 describe('saga integration', () => {
   it('handles inventory failure and marks order as failed', async () => {

@@ -50,6 +50,10 @@ importers:
       zod:
         specifier: ^3.22.4
         version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.12.7
+        version: 20.19.24
 
   services/inventory:
     dependencies:
@@ -84,6 +88,9 @@ importers:
 
   services/message-queue:
     dependencies:
+      '@reatiler/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       fastify:
         specifier: ^4.26.2
         version: 4.29.1

@@ -4,7 +4,7 @@ import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import type { EventBus } from '@reatiler/shared';
-import { createEventEnvelope } from '@reatiler/shared';
+import { createEvent, logEvent } from '@reatiler/shared';
 
 import type { OrderStore } from '../orders.js';
 import { CreateOrderReq, Order, OrderIdParams } from './schemas.js';
@@ -43,20 +43,22 @@ export async function routes(app: FastifyInstance, { bus, store, logger }: Route
       cancellationLogged: false
     });
 
-    const event = createEventEnvelope({
-      eventName: 'OrderPlaced',
-      traceId,
-      correlationId: orderId,
-      data: {
+    const event = createEvent(
+      'OrderPlaced',
+      {
         orderId,
         lines,
         amount,
         address
+      },
+      {
+        traceId,
+        correlationId: orderId
       }
-    });
+    );
 
     await bus.push(INVENTORY_QUEUE, event);
-    logger.info({ orderId, traceId }, 'order placed');
+    logEvent(logger, event, 'order placed', { context: { orderId } });
 
     return reply.code(201).send({ orderId: order.orderId, status: order.status });
   });

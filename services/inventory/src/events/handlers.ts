@@ -1,45 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
-import { z } from 'zod';
-
 import type { EventBus, EventEnvelope } from '@reatiler/shared';
-import { createEventEnvelope, publishWithRetry, withTimeout } from '@reatiler/shared';
+import {
+  createEvent,
+  logEvent,
+  parseEvent,
+  publishWithRetry,
+  withTimeout
+} from '@reatiler/shared';
 
 import type { ReservationStore } from '../reservations.js';
-
-const AddressSchema = z
-  .object({
-    line1: z.string().min(1),
-    city: z.string().min(1),
-    zip: z.string().min(1),
-    country: z.string().min(1)
-  })
-  .strict();
-
-const OrderPlacedData = z
-  .object({
-    orderId: z.string().min(1),
-    lines: z
-      .array(
-        z
-          .object({
-            sku: z.string().min(1),
-            qty: z.number().int().positive()
-          })
-          .strict()
-      )
-      .nonempty(),
-    amount: z.number().positive(),
-    address: AddressSchema
-  })
-  .strict();
-
-const ReleaseStockData = z
-  .object({
-    reservationId: z.string().min(1),
-    orderId: z.string().min(1)
-  })
-  .strict();
 
 export type Logger = {
   info: (message: unknown, ...args: unknown[]) => void;
@@ -61,6 +31,15 @@ const PAYMENTS_QUEUE = 'payments';
 const FAILURE_QUEUES = ['orders', 'payments'];
 const ORDERS_QUEUE = 'orders';
 
+function logParseError(logger: Logger, event: EventEnvelope, message: string, error: unknown) {
+  logEvent(logger, event, message, {
+    level: 'warn',
+    context: {
+      error: error instanceof Error ? error.message : error
+    }
+  });
+}
+
 export function createOrderPlacedHandler({
   store,
   bus,
@@ -71,20 +50,22 @@ export function createOrderPlacedHandler({
   failureQueues = FAILURE_QUEUES
 }: CreateOrderPlacedHandlerOptions) {
   return async (event: EventEnvelope) => {
-    const parsed = OrderPlacedData.safeParse(event.data);
+    let parsed;
 
-    if (!parsed.success) {
-      logger.warn?.(
-        { eventName: event.eventName, issues: parsed.error.issues },
-        'invalid OrderPlaced payload received'
-      );
+    try {
+      parsed = parseEvent('OrderPlaced', event);
+    } catch (error) {
+      logParseError(logger, event, 'invalid OrderPlaced payload received', error);
       return;
     }
 
-    const { orderId, lines, amount, address } = parsed.data;
+    const { envelope, data } = parsed;
+    const { orderId, lines, amount, address } = data;
 
     if (store.findByOrderId(orderId)) {
-      logger.info({ orderId }, 'reservation already exists, skipping duplicate OrderPlaced');
+      logEvent(logger, envelope, 'reservation already exists, skipping duplicate OrderPlaced', {
+        context: { orderId }
+      });
       return;
     }
 
@@ -119,41 +100,51 @@ export function createOrderPlacedHandler({
         status: 'FAILED'
       });
 
-      const failureEvent = createEventEnvelope({
-        eventName: 'InventoryReservationFailed',
-        traceId: event.traceId,
-        correlationId: orderId,
-        causationId: event.eventId,
-        data: {
+      const failureEvent = createEvent(
+        'InventoryReservationFailed',
+        {
           reservationId,
           orderId,
           reason
+        },
+        {
+          traceId: envelope.traceId,
+          correlationId: orderId,
+          causationId: envelope.eventId
         }
-      });
+      );
 
       await Promise.all(
         failureQueues.map((queue) => publishWithRetry(bus, queue, failureEvent, logger))
       );
-      logger.warn?.({ orderId, reservationId, reason }, 'inventory reservation failed');
+
+      logEvent(logger, envelope, 'inventory reservation failed', {
+        level: 'warn',
+        context: { orderId, reservationId, reason }
+      });
       return;
     }
 
-    const reservationEvent = createEventEnvelope({
-      eventName: 'InventoryReserved',
-      traceId: event.traceId,
-      correlationId: orderId,
-      causationId: event.eventId,
-      data: {
+    const reservationEvent = createEvent(
+      'InventoryReserved',
+      {
         reservationId,
         orderId,
         items: lines,
         amount,
         address
+      },
+      {
+        traceId: envelope.traceId,
+        correlationId: orderId,
+        causationId: envelope.eventId
       }
-    });
+    );
 
     await publishWithRetry(bus, nextQueue, reservationEvent, logger);
-    logger.info({ orderId, reservationId }, 'inventory reserved');
+    logEvent(logger, envelope, 'inventory reserved', {
+      context: { orderId, reservationId }
+    });
   };
 }
 
@@ -171,55 +162,62 @@ export function createReleaseStockHandler({
   nextQueue = ORDERS_QUEUE
 }: CreateReleaseStockHandlerOptions) {
   return async (event: EventEnvelope) => {
-    const parsed = ReleaseStockData.safeParse(event.data);
+    let parsed;
 
-    if (!parsed.success) {
-      logger.warn?.(
-        { eventName: event.eventName, issues: parsed.error.issues },
-        'invalid ReleaseStock payload received'
-      );
+    try {
+      parsed = parseEvent('ReleaseStock', event);
+    } catch (error) {
+      logParseError(logger, event, 'invalid ReleaseStock payload received', error);
       return;
     }
 
-    const { reservationId, orderId } = parsed.data;
+    const { envelope, data } = parsed;
+    const { reservationId, orderId } = data;
+
     const reservation =
       store.findByReservationId(reservationId) ?? store.findByOrderId(orderId);
 
     if (!reservation) {
-      logger.warn?.(
-        { orderId, reservationId },
-        'reservation not found when processing ReleaseStock'
-      );
+      logEvent(logger, envelope, 'reservation not found when processing ReleaseStock', {
+        level: 'warn',
+        context: { orderId, reservationId }
+      });
       return;
     }
 
     if (reservation.status === 'RELEASED') {
-      logger.info({ orderId, reservationId }, 'stock already released');
+      logEvent(logger, envelope, 'stock already released', {
+        context: { orderId, reservationId }
+      });
       return;
     }
 
     if (reservation.status !== 'RESERVED') {
-      logger.warn?.(
-        { orderId, reservationId, status: reservation.status },
-        'reservation in unexpected status when releasing stock'
-      );
+      logEvent(logger, envelope, 'reservation in unexpected status when releasing stock', {
+        level: 'warn',
+        context: { orderId, reservationId, status: reservation.status }
+      });
       return;
     }
 
     store.updateStatus(reservation.reservationId, 'RELEASED');
 
-    const releasedEvent = createEventEnvelope({
-      eventName: 'InventoryReleased',
-      traceId: event.traceId,
-      correlationId: orderId,
-      causationId: event.eventId,
-      data: {
+    const releasedEvent = createEvent(
+      'InventoryReleased',
+      {
         reservationId: reservation.reservationId,
         orderId
+      },
+      {
+        traceId: envelope.traceId,
+        correlationId: orderId,
+        causationId: envelope.eventId
       }
-    });
+    );
 
     await publishWithRetry(bus, nextQueue, releasedEvent, logger);
-    logger.info({ orderId, reservationId }, 'stock released');
+    logEvent(logger, envelope, 'stock released', {
+      context: { orderId, reservationId: reservation.reservationId }
+    });
   };
 }
