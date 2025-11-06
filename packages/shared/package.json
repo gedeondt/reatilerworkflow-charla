@@ -18,7 +18,8 @@
     "./logger": "./src/logger.ts",
     "./z": "./src/z.ts",
     "./http": "./src/http.ts",
-    "./env": "./src/env.ts"
+    "./env": "./src/env.ts",
+    "./event-bus-client": "./src/event-bus-client.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

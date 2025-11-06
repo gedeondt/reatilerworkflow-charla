@@ -6,37 +6,48 @@ import { buildServer } from '../src/server.js';
 const baseEnvelope = {
   eventName: 'OrderPlaced',
   version: 1 as const,
-  eventId: 'evt-1',
+  eventId: '00000000-0000-0000-0000-000000000001',
   traceId: 'trace-1',
   correlationId: 'corr-1',
-  occurredAt: new Date().toISOString(),
+  occurredAt: '2025-01-01T00:00:00.000Z',
   data: { orderId: 'ord-1' }
 };
 
 describe('InMemoryQueue', () => {
-  it('pushes and pops messages for a queue', () => {
+  it('pushes and pops messages in FIFO order', () => {
     const queue = new InMemoryQueue();
 
     queue.push('orders', baseEnvelope);
-    const message = queue.pop('orders');
+    queue.push('orders', { ...baseEnvelope, eventId: '00000000-0000-0000-0000-000000000002', traceId: 'trace-2' });
 
-    expect(message).toEqual(baseEnvelope);
-  });
-
-  it('preserves FIFO ordering', () => {
-    const queue = new InMemoryQueue();
-
-    queue.push('orders', baseEnvelope);
-    queue.push('orders', { ...baseEnvelope, eventId: 'evt-2', traceId: 'trace-2' });
-
-    expect(queue.pop('orders')?.eventId).toBe('evt-1');
-    expect(queue.pop('orders')?.eventId).toBe('evt-2');
+    expect(queue.pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000001');
+    expect(queue.pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000002');
     expect(queue.pop('orders')).toBeNull();
   });
 });
 
 describe('queue routes', () => {
-  it('validates event envelopes on publish', async () => {
+  it('rejects envelopes missing identifiers', async () => {
+    const server = buildServer();
+    await server.ready();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/queues/orders/messages',
+      payload: {
+        ...baseEnvelope,
+        eventId: undefined
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    const json = response.json();
+    expect(json.error).toBe('Invalid event envelope');
+
+    await server.close();
+  });
+
+  it('rejects envelopes with invalid version', async () => {
     const server = buildServer();
     await server.ready();
 
@@ -47,11 +58,28 @@ describe('queue routes', () => {
     });
 
     expect(response.statusCode).toBe(400);
+
+    await server.close();
+  });
+
+  it('returns empty status when queue has no messages', async () => {
+    const server = buildServer();
+    await server.ready();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/queues/orders:pop'
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'empty' });
+
     await server.close();
   });
 
   it('enqueues and dequeues messages via HTTP routes', async () => {
-    const server = buildServer();
+    const queue = new InMemoryQueue();
+    const server = buildServer(queue);
     await server.ready();
 
     const enqueueResponse = await server.inject({
@@ -61,14 +89,15 @@ describe('queue routes', () => {
     });
 
     expect(enqueueResponse.statusCode).toBe(202);
+    expect(queue.size('orders')).toBe(1);
 
     const popResponse = await server.inject({
       method: 'POST',
-      url: '/queues/orders/pop'
+      url: '/queues/orders:pop'
     });
 
     expect(popResponse.statusCode).toBe(200);
-    expect(popResponse.json()).toEqual({ status: 'ok', message: baseEnvelope });
+    expect(popResponse.json()).toEqual({ message: baseEnvelope });
 
     await server.close();
   });
