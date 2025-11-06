@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: Inventory Service API
+  version: 1.0.0
+paths:
+  /reservations:
+    post:
+      summary: Crea una nueva reserva de inventario
+      operationId: createReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReservationRequest'
+      responses:
+        '201':
+          description: Reserva creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+  /reservations/{id}:
+    get:
+      summary: Obtiene una reserva por identificador
+      operationId: getReservation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Reserva encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+  /reservations/{id}/commit:
+    post:
+      summary: Confirma una reserva de inventario
+      operationId: commitReservation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Confirmación aceptada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationActionResponse'
+  /reservations/{id}/release:
+    post:
+      summary: Libera una reserva de inventario
+      operationId: releaseReservation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Liberación aceptada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationActionResponse'
+components:
+  schemas:
+    Reservation:
+      type: object
+      description: Representa una reserva de inventario vinculada a un pedido.
+      properties:
+        reservationId:
+          type: string
+          example: RSV-987654
+        orderId:
+          type: string
+          example: ORD-123456
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservationItem'
+        status:
+          type: string
+          enum:
+            - PENDING
+            - RESERVED
+            - COMMITTED
+            - RELEASED
+            - FAILED
+          example: RESERVED
+      required:
+        - reservationId
+        - orderId
+        - items
+        - status
+      additionalProperties: false
+    ReservationItem:
+      type: object
+      description: Item reservado con cantidad requerida.
+      properties:
+        sku:
+          type: string
+          example: SKU-001
+        qty:
+          type: integer
+          minimum: 1
+          example: 2
+      required:
+        - sku
+        - qty
+      additionalProperties: false
+    CreateReservationRequest:
+      type: object
+      description: Solicitud para reservar inventario.
+      properties:
+        orderId:
+          type: string
+          example: ORD-123456
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/ReservationItem'
+      required:
+        - orderId
+        - items
+      additionalProperties: false
+    ReservationActionResponse:
+      type: object
+      description: Respuesta a una acción sobre la reserva.
+      properties:
+        reservationId:
+          type: string
+          example: RSV-987654
+        status:
+          type: string
+          enum:
+            - PENDING
+            - RESERVED
+            - COMMITTED
+            - RELEASED
+            - FAILED
+          example: COMMITTED
+      required:
+        - reservationId
+        - status
+      additionalProperties: false

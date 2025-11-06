@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://retailer-workflow/specs/shipment.json",
+  "title": "Shipment",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "shipmentId": {
+      "type": "string"
+    },
+    "orderId": {
+      "type": "string"
+    },
+    "address": {
+      "$ref": "#/definitions/Address"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "PREPARED",
+        "DISPATCHED",
+        "FAILED"
+      ]
+    }
+  },
+  "required": [
+    "shipmentId",
+    "orderId",
+    "address",
+    "status"
+  ],
+  "definitions": {
+    "Address": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "line1": {
+          "type": "string"
+        },
+        "city": {
+          "type": "string"
+        },
+        "zip": {
+          "type": "string"
+        },
+        "country": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "line1",
+        "city",
+        "zip",
+        "country"
+      ]
+    }
+  }
+}

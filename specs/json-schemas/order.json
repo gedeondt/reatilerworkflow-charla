@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://retailer-workflow/specs/order.json",
+  "title": "Order",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "orderId": {
+      "type": "string"
+    },
+    "lines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/OrderLine"
+      }
+    },
+    "amount": {
+      "type": "number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PLACED",
+        "CANCELLED",
+        "CONFIRMED",
+        "FAILED"
+      ]
+    }
+  },
+  "required": [
+    "orderId",
+    "lines",
+    "amount",
+    "status"
+  ],
+  "definitions": {
+    "OrderLine": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sku": {
+          "type": "string"
+        },
+        "qty": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "sku",
+        "qty"
+      ]
+    }
+  }
+}

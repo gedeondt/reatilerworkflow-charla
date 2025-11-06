@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://retailer-workflow/specs/event-envelope.json",
+  "title": "Event Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "eventName": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "traceId": {
+      "type": "string"
+    },
+    "correlationId": {
+      "type": "string"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "causationId": {
+      "type": ["string", "null"]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "eventName",
+    "version",
+    "eventId",
+    "traceId",
+    "correlationId",
+    "occurredAt",
+    "data"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://retailer-workflow/specs/payment.json",
+  "title": "Payment",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "paymentId": {
+      "type": "string"
+    },
+    "orderId": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "AUTHORIZED",
+        "CAPTURED",
+        "REFUNDED",
+        "FAILED"
+      ]
+    }
+  },
+  "required": [
+    "paymentId",
+    "orderId",
+    "amount",
+    "status"
+  ]
+}

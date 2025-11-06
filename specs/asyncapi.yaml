@@ -1,0 +1,479 @@
+asyncapi: 2.6.0
+info:
+  title: Retailer Workflow Events
+  version: 1.0.0
+defaultContentType: application/json
+components:
+  messages:
+    OrderPlaced:
+      name: OrderPlaced
+      payload:
+        $ref: '#/components/schemas/OrderPlacedEvent'
+    OrderConfirmed:
+      name: OrderConfirmed
+      payload:
+        $ref: '#/components/schemas/OrderConfirmedEvent'
+    OrderCancelled:
+      name: OrderCancelled
+      payload:
+        $ref: '#/components/schemas/OrderCancelledEvent'
+    OrderFailed:
+      name: OrderFailed
+      payload:
+        $ref: '#/components/schemas/OrderFailedEvent'
+    InventoryReserved:
+      name: InventoryReserved
+      payload:
+        $ref: '#/components/schemas/InventoryReservedEvent'
+    InventoryReservationFailed:
+      name: InventoryReservationFailed
+      payload:
+        $ref: '#/components/schemas/InventoryReservationFailedEvent'
+    InventoryCommitted:
+      name: InventoryCommitted
+      payload:
+        $ref: '#/components/schemas/InventoryCommittedEvent'
+    InventoryReleased:
+      name: InventoryReleased
+      payload:
+        $ref: '#/components/schemas/InventoryReleasedEvent'
+    PaymentAuthorized:
+      name: PaymentAuthorized
+      payload:
+        $ref: '#/components/schemas/PaymentAuthorizedEvent'
+    PaymentCaptured:
+      name: PaymentCaptured
+      payload:
+        $ref: '#/components/schemas/PaymentCapturedEvent'
+    PaymentFailed:
+      name: PaymentFailed
+      payload:
+        $ref: '#/components/schemas/PaymentFailedEvent'
+    PaymentRefunded:
+      name: PaymentRefunded
+      payload:
+        $ref: '#/components/schemas/PaymentRefundedEvent'
+    ShipmentPrepared:
+      name: ShipmentPrepared
+      payload:
+        $ref: '#/components/schemas/ShipmentPreparedEvent'
+    ShipmentDispatched:
+      name: ShipmentDispatched
+      payload:
+        $ref: '#/components/schemas/ShipmentDispatchedEvent'
+    ShipmentFailed:
+      name: ShipmentFailed
+      payload:
+        $ref: '#/components/schemas/ShipmentFailedEvent'
+  schemas:
+    Envelope:
+      type: object
+      description: Sobre estándar para eventos publicados en la plataforma.
+      properties:
+        eventName:
+          type: string
+          example: OrderPlaced
+        version:
+          type: integer
+          const: 1
+        eventId:
+          type: string
+          format: uuid
+          example: 7b4f9c4a-1d8e-4b70-8ef2-2b9c7d7b3c89
+        traceId:
+          type: string
+          example: trace-12345
+        correlationId:
+          type: string
+          example: corr-67890
+        occurredAt:
+          type: string
+          format: date-time
+          example: '2024-01-15T10:15:30Z'
+        causationId:
+          type: string
+          nullable: true
+          example: evt-previous
+        data:
+          type: object
+      required:
+        - eventName
+        - version
+        - eventId
+        - traceId
+        - correlationId
+        - occurredAt
+        - data
+      additionalProperties: false
+    OrderLine:
+      type: object
+      properties:
+        sku:
+          type: string
+          example: SKU-001
+        qty:
+          type: integer
+          minimum: 1
+          example: 2
+      required:
+        - sku
+        - qty
+      additionalProperties: false
+    ReservationItem:
+      type: object
+      properties:
+        sku:
+          type: string
+          example: SKU-001
+        qty:
+          type: integer
+          minimum: 1
+          example: 2
+      required:
+        - sku
+        - qty
+      additionalProperties: false
+    Address:
+      type: object
+      properties:
+        line1:
+          type: string
+          example: Calle Falsa 123
+        city:
+          type: string
+          example: Ciudad Gótica
+        zip:
+          type: string
+          example: '12345'
+        country:
+          type: string
+          example: AR
+      required:
+        - line1
+        - city
+        - zip
+        - country
+      additionalProperties: false
+    OrderPlacedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                orderId:
+                  type: string
+                  example: ORD-123456
+                lines:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/OrderLine'
+                amount:
+                  type: number
+                  format: double
+                  example: 149.99
+              required:
+                - orderId
+                - lines
+                - amount
+              additionalProperties: false
+    OrderConfirmedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                orderId:
+                  type: string
+                  example: ORD-123456
+                status:
+                  type: string
+                  enum:
+                    - CONFIRMED
+                  example: CONFIRMED
+              required:
+                - orderId
+                - status
+              additionalProperties: false
+    OrderCancelledEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                orderId:
+                  type: string
+                  example: ORD-123456
+                status:
+                  type: string
+                  enum:
+                    - CANCELLED
+                  example: CANCELLED
+                reason:
+                  type: string
+                  example: Customer requested cancellation
+              required:
+                - orderId
+                - status
+              additionalProperties: false
+    OrderFailedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                orderId:
+                  type: string
+                  example: ORD-123456
+                status:
+                  type: string
+                  enum:
+                    - FAILED
+                  example: FAILED
+                reason:
+                  type: string
+                  example: Inventory reservation failed
+              required:
+                - orderId
+                - status
+              additionalProperties: false
+    InventoryReservedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                reservationId:
+                  type: string
+                  example: RSV-987654
+                orderId:
+                  type: string
+                  example: ORD-123456
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ReservationItem'
+              required:
+                - reservationId
+                - orderId
+                - items
+              additionalProperties: false
+    InventoryReservationFailedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                reservationId:
+                  type: string
+                  example: RSV-987654
+                orderId:
+                  type: string
+                  example: ORD-123456
+                reason:
+                  type: string
+                  example: Out of stock
+              required:
+                - reservationId
+                - orderId
+                - reason
+              additionalProperties: false
+    InventoryCommittedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                reservationId:
+                  type: string
+                  example: RSV-987654
+                orderId:
+                  type: string
+                  example: ORD-123456
+              required:
+                - reservationId
+                - orderId
+              additionalProperties: false
+    InventoryReleasedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                reservationId:
+                  type: string
+                  example: RSV-987654
+                orderId:
+                  type: string
+                  example: ORD-123456
+              required:
+                - reservationId
+                - orderId
+              additionalProperties: false
+    PaymentAuthorizedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                paymentId:
+                  type: string
+                  example: PAY-456789
+                orderId:
+                  type: string
+                  example: ORD-123456
+                amount:
+                  type: number
+                  format: double
+                  example: 149.99
+              required:
+                - paymentId
+                - orderId
+                - amount
+              additionalProperties: false
+    PaymentCapturedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                paymentId:
+                  type: string
+                  example: PAY-456789
+                orderId:
+                  type: string
+                  example: ORD-123456
+                amount:
+                  type: number
+                  format: double
+                  example: 149.99
+              required:
+                - paymentId
+                - orderId
+                - amount
+              additionalProperties: false
+    PaymentFailedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                paymentId:
+                  type: string
+                  example: PAY-456789
+                orderId:
+                  type: string
+                  example: ORD-123456
+                reason:
+                  type: string
+                  example: Card declined
+              required:
+                - paymentId
+                - orderId
+                - reason
+              additionalProperties: false
+    PaymentRefundedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                paymentId:
+                  type: string
+                  example: PAY-456789
+                orderId:
+                  type: string
+                  example: ORD-123456
+                amount:
+                  type: number
+                  format: double
+                  example: 149.99
+              required:
+                - paymentId
+                - orderId
+                - amount
+              additionalProperties: false
+    ShipmentPreparedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                shipmentId:
+                  type: string
+                  example: SHP-654321
+                orderId:
+                  type: string
+                  example: ORD-123456
+                address:
+                  $ref: '#/components/schemas/Address'
+              required:
+                - shipmentId
+                - orderId
+                - address
+              additionalProperties: false
+    ShipmentDispatchedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                shipmentId:
+                  type: string
+                  example: SHP-654321
+                orderId:
+                  type: string
+                  example: ORD-123456
+              required:
+                - shipmentId
+                - orderId
+              additionalProperties: false
+    ShipmentFailedEvent:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                shipmentId:
+                  type: string
+                  example: SHP-654321
+                orderId:
+                  type: string
+                  example: ORD-123456
+                reason:
+                  type: string
+                  example: Carrier unavailable
+              required:
+                - shipmentId
+                - orderId
+                - reason
+              additionalProperties: false
