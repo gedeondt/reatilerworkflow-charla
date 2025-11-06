@@ -1,34 +1,31 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { FakeEventBus } from '@reatiler/shared/event-bus';
+import { FakeEventBus, createEvent } from '@reatiler/shared';
 import type { EventEnvelope } from '@reatiler/shared';
 
 import { createShipmentStore } from '../src/shipments.js';
 import { createPaymentAuthorizedHandler } from '../src/events/handlers.js';
 
-const paymentAuthorizedEvent = (): EventEnvelope => ({
-  eventName: 'PaymentAuthorized',
-  version: 1,
-  eventId: 'evt-5',
-  traceId: 'trace-1',
-  correlationId: 'order-1',
-  occurredAt: new Date().toISOString(),
-  data: {
-    paymentId: 'pay-1',
-    orderId: 'order-1',
-    reservationId: 'rsv-1',
-    amount: 199.99,
-    address: {
-      line1: 'Main St 123',
-      city: 'Metropolis',
-      zip: '12345',
-      country: 'AR'
-    }
-  }
-});
+const paymentAuthorizedEvent = (): EventEnvelope =>
+  createEvent(
+    'PaymentAuthorized',
+    {
+      paymentId: 'pay-1',
+      orderId: 'order-1',
+      reservationId: 'rsv-1',
+      amount: 199.99,
+      address: {
+        line1: 'Main St 123',
+        city: 'Metropolis',
+        zip: '12345',
+        country: 'AR'
+      }
+    },
+    { traceId: 'trace-1', correlationId: 'order-1' }
+  );
 
 describe('shipping payment authorized handler', () => {
-  it('prepares a shipment and publishes ShipmentPrepared', async () => {
+  it('prepares a shipment and publishes ShipmentPrepared with propagated metadata', async () => {
     const store = createShipmentStore();
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -41,7 +38,8 @@ describe('shipping payment authorized handler', () => {
       opTimeoutMs: 1000
     });
 
-    await handler(paymentAuthorizedEvent());
+    const incoming = paymentAuthorizedEvent();
+    await handler(incoming);
 
     const shipment = store.findByOrderId('order-1');
     expect(shipment).not.toBeNull();
@@ -49,6 +47,9 @@ describe('shipping payment authorized handler', () => {
 
     const published = await bus.pop('payments');
     expect(published?.eventName).toBe('ShipmentPrepared');
+    expect(published?.traceId).toBe(incoming.traceId);
+    expect(published?.correlationId).toBe('order-1');
+    expect(published?.causationId).toBe(incoming.eventId);
     expect(published?.data).toMatchObject({ shipmentId: expect.any(String) });
   });
 

@@ -1,55 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
-import { z } from 'zod';
-
-import type { EventBus, EventEnvelope } from '@reatiler/shared';
-import { createEventEnvelope, publishWithRetry, withTimeout } from '@reatiler/shared';
+import type { EventBus, EventEnvelope, EventName } from '@reatiler/shared';
+import {
+  createEvent,
+  logEvent,
+  parseEvent,
+  publishWithRetry,
+  withTimeout
+} from '@reatiler/shared';
 
 import type { PaymentStore } from '../payments.js';
-
-const AddressSchema = z
-  .object({
-    line1: z.string().min(1),
-    city: z.string().min(1),
-    zip: z.string().min(1),
-    country: z.string().min(1)
-  })
-  .strict();
-
-const InventoryReservedData = z
-  .object({
-    reservationId: z.string().min(1),
-    orderId: z.string().min(1),
-    items: z
-      .array(
-        z
-          .object({
-            sku: z.string().min(1),
-            qty: z.number().int().positive()
-          })
-          .strict()
-      )
-      .nonempty(),
-    amount: z.number().positive(),
-    address: AddressSchema
-  })
-  .strict();
-
-const ShipmentPreparedData = z
-  .object({
-    shipmentId: z.string().min(1),
-    orderId: z.string().min(1),
-    address: AddressSchema
-  })
-  .strict();
-
-const RefundPaymentData = z
-  .object({
-    paymentId: z.string().min(1),
-    orderId: z.string().min(1),
-    reason: z.string().min(1)
-  })
-  .strict();
 
 export type Logger = {
   info: (message: unknown, ...args: unknown[]) => void;
@@ -86,6 +46,23 @@ const SHIPPING_QUEUE = 'shipping';
 const ORDERS_QUEUE = 'orders';
 const FAILURE_QUEUES = ['orders', 'inventory'];
 
+function safeParse<N extends EventName>(
+  eventName: N,
+  event: EventEnvelope,
+  logger: Logger,
+  message: string
+) {
+  try {
+    return parseEvent(eventName, event);
+  } catch (error) {
+    logEvent(logger, event, message, {
+      level: 'warn',
+      context: { error: error instanceof Error ? error.message : error }
+    });
+    return null;
+  }
+}
+
 export function createInventoryReservedHandler({
   store,
   bus,
@@ -96,20 +73,19 @@ export function createInventoryReservedHandler({
   failureQueues = FAILURE_QUEUES
 }: CreateInventoryReservedHandlerOptions) {
   return async (event: EventEnvelope) => {
-    const parsed = InventoryReservedData.safeParse(event.data);
+    const parsed = safeParse('InventoryReserved', event, logger, 'invalid InventoryReserved payload received');
 
-    if (!parsed.success) {
-      logger.warn?.(
-        { eventName: event.eventName, issues: parsed.error.issues },
-        'invalid InventoryReserved payload received'
-      );
+    if (!parsed) {
       return;
     }
 
-    const { orderId, amount, address, reservationId } = parsed.data;
+    const { envelope, data } = parsed;
+    const { orderId, amount, address, reservationId } = data;
 
     if (store.findByOrderId(orderId)) {
-      logger.info({ orderId }, 'payment already exists, skipping duplicate InventoryReserved');
+      logEvent(logger, envelope, 'payment already exists, skipping duplicate InventoryReserved', {
+        context: { orderId }
+      });
       return;
     }
 
@@ -144,42 +120,52 @@ export function createInventoryReservedHandler({
         status: 'FAILED'
       });
 
-      const failedEvent = createEventEnvelope({
-        eventName: 'PaymentFailed',
-        traceId: event.traceId,
-        correlationId: orderId,
-        causationId: event.eventId,
-        data: {
+      const failedEvent = createEvent(
+        'PaymentFailed',
+        {
           paymentId,
           orderId,
           reservationId,
           reason
+        },
+        {
+          traceId: envelope.traceId,
+          correlationId: orderId,
+          causationId: envelope.eventId
         }
-      });
+      );
 
       await Promise.all(
         failureQueues.map((queue) => publishWithRetry(bus, queue, failedEvent, logger))
       );
-      logger.warn?.({ orderId, paymentId, reason }, 'payment authorization failed');
+
+      logEvent(logger, envelope, 'payment authorization failed', {
+        level: 'warn',
+        context: { orderId, paymentId, reason }
+      });
       return;
     }
 
-    const authorizedEvent = createEventEnvelope({
-      eventName: 'PaymentAuthorized',
-      traceId: event.traceId,
-      correlationId: orderId,
-      causationId: event.eventId,
-      data: {
+    const authorizedEvent = createEvent(
+      'PaymentAuthorized',
+      {
         paymentId,
         orderId,
         reservationId,
         amount,
         address
+      },
+      {
+        traceId: envelope.traceId,
+        correlationId: orderId,
+        causationId: envelope.eventId
       }
-    });
+    );
 
     await publishWithRetry(bus, nextQueue, authorizedEvent, logger);
-    logger.info({ orderId, paymentId }, 'payment authorized');
+    logEvent(logger, envelope, 'payment authorized', {
+      context: { orderId, paymentId }
+    });
   };
 }
 
@@ -191,26 +177,28 @@ export function createShipmentPreparedHandler({
   nextQueue = ORDERS_QUEUE
 }: CreateShipmentPreparedHandlerOptions) {
   return async (event: EventEnvelope) => {
-    const parsed = ShipmentPreparedData.safeParse(event.data);
+    const parsed = safeParse('ShipmentPrepared', event, logger, 'invalid ShipmentPrepared payload received');
 
-    if (!parsed.success) {
-      logger.warn?.(
-        { eventName: event.eventName, issues: parsed.error.issues },
-        'invalid ShipmentPrepared payload received'
-      );
+    if (!parsed) {
       return;
     }
 
-    const { orderId } = parsed.data;
+    const { envelope, data } = parsed;
+    const { orderId } = data;
     const payment = store.findByOrderId(orderId);
 
     if (!payment) {
-      logger.warn?.({ orderId }, 'payment not found when processing ShipmentPrepared');
+      logEvent(logger, envelope, 'payment not found when processing ShipmentPrepared', {
+        level: 'warn',
+        context: { orderId }
+      });
       return;
     }
 
     if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED') {
-      logger.info({ orderId }, 'payment already captured, skipping duplicate ShipmentPrepared');
+      logEvent(logger, envelope, 'payment already captured, skipping duplicate ShipmentPrepared', {
+        context: { orderId }
+      });
       return;
     }
 
@@ -220,20 +208,24 @@ export function createShipmentPreparedHandler({
 
     await withTimeout(Promise.resolve().then(capture), opTimeoutMs);
 
-    const capturedEvent = createEventEnvelope({
-      eventName: 'PaymentCaptured',
-      traceId: event.traceId,
-      correlationId: orderId,
-      causationId: event.eventId,
-      data: {
+    const capturedEvent = createEvent(
+      'PaymentCaptured',
+      {
         paymentId: payment.paymentId,
         orderId,
         amount: payment.amount
+      },
+      {
+        traceId: envelope.traceId,
+        correlationId: orderId,
+        causationId: envelope.eventId
       }
-    });
+    );
 
     await publishWithRetry(bus, nextQueue, capturedEvent, logger);
-    logger.info({ orderId, paymentId: payment.paymentId }, 'payment captured');
+    logEvent(logger, envelope, 'payment captured', {
+      context: { orderId, paymentId: payment.paymentId }
+    });
   };
 }
 
@@ -244,50 +236,59 @@ export function createRefundPaymentHandler({
   nextQueue = ORDERS_QUEUE
 }: CreateRefundPaymentHandlerOptions) {
   return async (event: EventEnvelope) => {
-    const parsed = RefundPaymentData.safeParse(event.data);
+    const parsed = safeParse('RefundPayment', event, logger, 'invalid RefundPayment payload received');
 
-    if (!parsed.success) {
-      logger.warn?.(
-        { eventName: event.eventName, issues: parsed.error.issues },
-        'invalid RefundPayment payload received'
-      );
+    if (!parsed) {
       return;
     }
 
-    const { paymentId, orderId, reason } = parsed.data;
+    const { envelope, data } = parsed;
+    const { paymentId, orderId, reason } = data;
     const payment = store.findByOrderId(orderId);
 
     if (!payment || payment.paymentId !== paymentId) {
-      logger.warn?.({ orderId, paymentId }, 'payment not found when processing RefundPayment');
+      logEvent(logger, envelope, 'payment not found when processing RefundPayment', {
+        level: 'warn',
+        context: { orderId, paymentId }
+      });
       return;
     }
 
     if (payment.status === 'REFUNDED') {
-      logger.info({ orderId, paymentId }, 'payment already refunded, skipping');
+      logEvent(logger, envelope, 'payment already refunded, skipping', {
+        context: { orderId, paymentId }
+      });
       return;
     }
 
     if (payment.status !== 'CAPTURED') {
-      logger.warn?.({ orderId, paymentId, status: payment.status }, 'payment not captured, cannot refund');
+      logEvent(logger, envelope, 'payment not captured, cannot refund', {
+        level: 'warn',
+        context: { orderId, paymentId, status: payment.status }
+      });
       return;
     }
 
     store.updateStatus(orderId, 'REFUNDED');
 
-    const refundedEvent = createEventEnvelope({
-      eventName: 'PaymentRefunded',
-      traceId: event.traceId,
-      correlationId: orderId,
-      causationId: event.eventId,
-      data: {
+    const refundedEvent = createEvent(
+      'PaymentRefunded',
+      {
         paymentId,
         orderId,
         amount: payment.amount,
         reason
+      },
+      {
+        traceId: envelope.traceId,
+        correlationId: orderId,
+        causationId: envelope.eventId
       }
-    });
+    );
 
     await publishWithRetry(bus, nextQueue, refundedEvent, logger);
-    logger.info({ orderId, paymentId }, 'payment refunded');
+    logEvent(logger, envelope, 'payment refunded', {
+      context: { orderId, paymentId }
+    });
   };
 }

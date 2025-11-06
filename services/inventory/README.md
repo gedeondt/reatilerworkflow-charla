@@ -9,7 +9,9 @@ Servicio encargado de la gestión de inventario.
 ## Variables de entorno
 
 - `PORT`: Puerto HTTP de escucha.
-- `MESSAGE_QUEUE_URL`: URL del servicio de colas (por defecto `http://localhost:3005`).
+- `ALLOW_RESERVATION`: Habilita o deshabilita la reserva de stock.
+- `WORKER_POLL_MS`: Intervalo (ms) entre polls a la cola.
+- `OP_TIMEOUT_MS`: Timeout (ms) para operaciones críticas.
 - `LOG_LEVEL`: Nivel de logging opcional.
 
 ## Ejemplo de verificación
@@ -21,5 +23,12 @@ curl http://localhost:3002/health
 Respuesta esperada:
 
 ```json
-{"status":"ok","service":"inventory"}
+{
+  "status": "ok",
+  "service": "inventory",
+  "worker": "up",
+  "queueName": "inventory",
+  "processedCount": 0,
+  "lastEventAt": null
+}
 ```

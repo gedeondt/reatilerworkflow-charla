@@ -1,4 +1,10 @@
-import { createHttpEventBus, ProcessedEventStore, startWorker, type EventBus, type WorkerController } from '@reatiler/shared';
+import {
+  ProcessedEventStore,
+  createEnvEventBus,
+  startWorker,
+  type EventBus,
+  type WorkerController
+} from '@reatiler/shared';
 
 import { env } from '../env.js';
 import type { Dispatcher } from './dispatcher.js';
@@ -23,7 +29,7 @@ type CreateWorkerOptions = {
 export function createWorker({
   logger,
   dispatcher,
-  bus = createHttpEventBus(env.MESSAGE_QUEUE_URL),
+  bus = createEnvEventBus(),
   store = new ProcessedEventStore(),
   pollIntervalMs
 }: CreateWorkerOptions): WorkerController {

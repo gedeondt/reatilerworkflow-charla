@@ -1,8 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { request as httpRequest, type OutgoingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { URL } from 'node:url';
 
 import { z } from './z.js';
+import { getMessageQueueUrl } from './env.js';
+import { getEventSchema, type EventData, type EventName } from './events-schemas.js';
 
 export type EventEnvelope = {
   eventName: string;
@@ -20,10 +23,10 @@ const eventEnvelopeSchema = z
     eventName: z.string(),
     version: z.literal(1),
     eventId: z.string().min(1),
-    traceId: z.string(),
-    correlationId: z.string(),
+    traceId: z.string().min(1),
+    correlationId: z.string().min(1),
     occurredAt: z.string().datetime(),
-    causationId: z.string().nullable().optional(),
+    causationId: z.string().min(1).nullable().optional(),
     data: z.record(z.unknown())
   })
   .strict();
@@ -145,6 +148,65 @@ export function createHttpEventBus(baseUrl: string): EventBus {
 
       return message;
     }
+  };
+}
+
+export function createEnvEventBus(): EventBus {
+  return createHttpEventBus(getMessageQueueUrl());
+}
+
+export function createEvent<N extends EventName>(
+  eventName: N,
+  data: EventData<N>,
+  {
+    traceId,
+    correlationId,
+    causationId
+  }: { traceId: string; correlationId: string; causationId?: string | null }
+): (EventEnvelope & { eventName: N; data: EventData<N> }) {
+  const schema = getEventSchema(eventName);
+
+  const parsedData = schema.parse(data) as EventData<N>;
+
+  const envelope: EventEnvelope = {
+    eventName,
+    version: 1,
+    eventId: randomUUID(),
+    traceId,
+    correlationId,
+    occurredAt: new Date().toISOString(),
+    data: parsedData
+  };
+
+  if (typeof causationId === 'string' && causationId.length > 0) {
+    envelope.causationId = causationId;
+  }
+
+  return envelope as EventEnvelope & { eventName: N; data: EventData<N> };
+}
+
+export function parseEvent<N extends EventName>(
+  eventName: N,
+  envelope: EventEnvelope
+): {
+  envelope: EventEnvelope & { eventName: N };
+  data: EventData<N>;
+} {
+  const parsedEnvelope = eventEnvelopeSchema.parse(envelope);
+
+  if (parsedEnvelope.eventName !== eventName) {
+    throw new Error(
+      `Unexpected event received. Expected "${eventName}" but got "${parsedEnvelope.eventName}".`
+    );
+  }
+
+  const schema = getEventSchema(eventName);
+
+  const data = schema.parse(parsedEnvelope.data) as EventData<N>;
+
+  return {
+    envelope: parsedEnvelope as EventEnvelope & { eventName: N },
+    data
   };
 }
 

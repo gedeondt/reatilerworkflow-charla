@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 
-import { createHttpEventBus } from '@reatiler/shared';
+import { createEnvEventBus } from '@reatiler/shared';
 
 import { env } from './env.js';
 import { routes } from './http/routes.js';
@@ -10,7 +10,7 @@ import { createReservationStore } from './reservations.js';
 import { createOrderPlacedHandler, createReleaseStockHandler } from './events/handlers.js';
 
 const server = Fastify({ logger: true });
-const bus = createHttpEventBus(env.MESSAGE_QUEUE_URL);
+const bus = createEnvEventBus();
 const dispatcher = createDispatcher(server.log);
 const store = createReservationStore();
 const worker = createWorker({
@@ -38,11 +38,18 @@ dispatcher.registerHandler(
 
 worker.start();
 
-server.get('/health', async () => ({
-  status: 'ok',
-  service: 'inventory',
-  worker: worker.isRunning() ? 'up' : 'down'
-}));
+server.get('/health', async () => {
+  const status = worker.getStatus();
+
+  return {
+    status: 'ok',
+    service: 'inventory',
+    worker: status.running ? 'up' : 'down',
+    queueName: status.queueName,
+    processedCount: status.processedCount,
+    lastEventAt: status.lastEventAt
+  };
+});
 
 server.register(async (app) => routes(app, { logger: server.log }));
 

@@ -20,13 +20,16 @@ type WorkerOptions = {
   quietPolling?: boolean;
 };
 
-type WorkerStatus = 'idle' | 'running';
-
 export type WorkerController = {
   start(): void;
   stop(): Promise<void>;
   isRunning(): boolean;
-  getStatus(): WorkerStatus;
+  getStatus(): {
+    running: boolean;
+    queueName: string;
+    processedCount: number;
+    lastEventAt: string | null;
+  };
 };
 
 type ProcessResult = 'empty' | 'duplicate' | 'processed';
@@ -42,9 +45,10 @@ export function startWorker({
   quietPolling = true
 }: WorkerOptions): WorkerController {
   let running = false;
-  let status: WorkerStatus = 'idle';
   let timer: ReturnType<typeof setTimeout> | null = null;
   let processing: Promise<void> | null = null;
+  let processedCount = 0;
+  let lastEventAt: string | null = null;
 
   const log = {
     info: logger?.info?.bind(logger),
@@ -68,6 +72,8 @@ export function startWorker({
     try {
       await dispatch(envelope);
       await markProcessed(envelope.eventId);
+      processedCount += 1;
+      lastEventAt = envelope.occurredAt;
       log.info?.(
         {
           eventName: envelope.eventName,
@@ -124,13 +130,11 @@ export function startWorker({
     }
 
     running = true;
-    status = 'running';
     schedule(0);
   };
 
   const stop = async () => {
     if (!running) {
-      status = 'idle';
       return;
     }
 
@@ -152,11 +156,15 @@ export function startWorker({
       }
     }
 
-    status = 'idle';
   };
 
   const isRunning = () => running;
-  const getStatus = () => status;
+  const getStatus = () => ({
+    running,
+    queueName,
+    processedCount,
+    lastEventAt
+  });
 
   return {
     start,

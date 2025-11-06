@@ -1,4 +1,4 @@
-import type { EventEnvelope } from './types.js';
+import type { EventEnvelope } from '@reatiler/shared';
 const queues = new Map<string, EventEnvelope[]>();
 export function push(name: string, ev: EventEnvelope) {
   const q = queues.get(name) ?? [];

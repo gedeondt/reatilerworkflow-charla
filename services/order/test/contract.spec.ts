@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import request from 'supertest';
-import { FakeEventBus } from '@reatiler/shared/event-bus';
+import { FakeEventBus } from '@reatiler/shared';
 
 import { routes } from '../src/http/routes.js';
 import { createOrderStore } from '../src/orders.js';
