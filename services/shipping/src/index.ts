@@ -13,11 +13,22 @@ const server = Fastify({ logger: true });
 const bus = createHttpEventBus(env.MESSAGE_QUEUE_URL);
 const dispatcher = createDispatcher(server.log);
 const store = createShipmentStore();
-const worker = createWorker({ logger: server.log, dispatcher, bus });
+const worker = createWorker({
+  logger: server.log,
+  dispatcher,
+  bus,
+  pollIntervalMs: env.WORKER_POLL_MS
+});
 
 dispatcher.registerHandler(
   'PaymentAuthorized',
-  createPaymentAuthorizedHandler({ store, bus, logger: server.log })
+  createPaymentAuthorizedHandler({
+    store,
+    bus,
+    logger: server.log,
+    allowPrepare: env.ALLOW_PREPARE,
+    opTimeoutMs: env.OP_TIMEOUT_MS
+  })
 );
 
 worker.start();

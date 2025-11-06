@@ -35,7 +35,12 @@ export async function routes(app: FastifyInstance, { bus, store, logger }: Route
       address,
       status: 'PLACED',
       traceId,
-      requestId
+      requestId,
+      reservationId: null,
+      paymentId: null,
+      shipmentId: null,
+      lastFailureReason: null,
+      cancellationLogged: false
     });
 
     const event = createEventEnvelope({

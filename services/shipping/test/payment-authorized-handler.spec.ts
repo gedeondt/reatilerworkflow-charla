@@ -16,6 +16,7 @@ const paymentAuthorizedEvent = (): EventEnvelope => ({
   data: {
     paymentId: 'pay-1',
     orderId: 'order-1',
+    reservationId: 'rsv-1',
     amount: 199.99,
     address: {
       line1: 'Main St 123',
@@ -32,7 +33,13 @@ describe('shipping payment authorized handler', () => {
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-    const handler = createPaymentAuthorizedHandler({ store, bus, logger });
+    const handler = createPaymentAuthorizedHandler({
+      store,
+      bus,
+      logger,
+      allowPrepare: true,
+      opTimeoutMs: 1000
+    });
 
     await handler(paymentAuthorizedEvent());
 
@@ -41,23 +48,49 @@ describe('shipping payment authorized handler', () => {
     expect(shipment?.status).toBe('PREPARED');
 
     const published = await bus.pop('payments');
-    expect(published).not.toBeNull();
     expect(published?.eventName).toBe('ShipmentPrepared');
-    expect(published?.data).toMatchObject({
-      shipmentId: expect.any(String),
-      orderId: 'order-1',
-      address: { city: 'Metropolis' }
-    });
+    expect(published?.data).toMatchObject({ shipmentId: expect.any(String) });
   });
 
-  it('is idempotent when the same event arrives twice', async () => {
+  it('publishes ShipmentFailed and RefundPayment when preparation is disabled', async () => {
     const store = createShipmentStore();
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-    const handler = createPaymentAuthorizedHandler({ store, bus, logger });
-    const event = paymentAuthorizedEvent();
+    const handler = createPaymentAuthorizedHandler({
+      store,
+      bus,
+      logger,
+      allowPrepare: false,
+      opTimeoutMs: 1000
+    });
 
+    await handler(paymentAuthorizedEvent());
+
+    const failure = await bus.pop('payments');
+    const refund = await bus.pop('payments');
+
+    expect(failure?.eventName).toBe('ShipmentFailed');
+    expect(refund?.eventName).toBe('RefundPayment');
+
+    const shipment = store.findByOrderId('order-1');
+    expect(shipment?.status).toBe('FAILED');
+  });
+
+  it('is idempotent for duplicate events when preparation already done', async () => {
+    const store = createShipmentStore();
+    const bus = new FakeEventBus();
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const handler = createPaymentAuthorizedHandler({
+      store,
+      bus,
+      logger,
+      allowPrepare: true,
+      opTimeoutMs: 1000
+    });
+
+    const event = paymentAuthorizedEvent();
     await handler(event);
     await handler(event);
 

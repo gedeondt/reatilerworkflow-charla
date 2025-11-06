@@ -23,6 +23,11 @@ export type ReservationRecord = {
 export type ReservationStore = {
   create: (reservation: ReservationRecord) => ReservationRecord;
   findByOrderId: (orderId: string) => ReservationRecord | null;
+  findByReservationId: (reservationId: string) => ReservationRecord | null;
+  updateStatus: (
+    reservationId: string,
+    status: ReservationRecord['status']
+  ) => ReservationRecord | null;
 };
 
 export function createReservationStore(): ReservationStore {
@@ -44,8 +49,32 @@ export function createReservationStore(): ReservationStore {
     return reservations.get(reservationId) ?? null;
   };
 
+  const findByReservationId = (reservationId: string): ReservationRecord | null => {
+    return reservations.get(reservationId) ?? null;
+  };
+
+  const updateStatus = (
+    reservationId: string,
+    status: ReservationRecord['status']
+  ): ReservationRecord | null => {
+    const current = reservations.get(reservationId);
+    if (!current) {
+      return null;
+    }
+
+    if (current.status === status) {
+      return current;
+    }
+
+    const updated: ReservationRecord = { ...current, status };
+    reservations.set(reservationId, updated);
+    return updated;
+  };
+
   return {
     create,
-    findByOrderId
+    findByOrderId,
+    findByReservationId,
+    updateStatus
   };
 }

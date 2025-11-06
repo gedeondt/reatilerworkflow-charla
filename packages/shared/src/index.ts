@@ -6,3 +6,4 @@ export * from './idempotency.js';
 export * from './worker.js';
 export * from './event-bus-client.js';
 export * from './event-utils.js';
+export * from './async.js';

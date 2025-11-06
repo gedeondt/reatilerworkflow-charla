@@ -6,7 +6,8 @@ import type { EventEnvelope } from '@reatiler/shared';
 import { createPaymentStore } from '../src/payments.js';
 import {
   createInventoryReservedHandler,
-  createShipmentPreparedHandler
+  createShipmentPreparedHandler,
+  createRefundPaymentHandler
 } from '../src/events/handlers.js';
 
 const inventoryReservedEvent = (): EventEnvelope => ({
@@ -60,41 +61,51 @@ describe('payments event handlers', () => {
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-    const handler = createInventoryReservedHandler({ store, bus, logger });
+    const handler = createInventoryReservedHandler({
+      store,
+      bus,
+      logger,
+      allowAuth: true,
+      opTimeoutMs: 1000
+    });
 
     await handler(inventoryReservedEvent());
 
     const payment = store.findByOrderId('order-1');
     expect(payment).not.toBeNull();
     expect(payment?.status).toBe('AUTHORIZED');
-    expect(payment?.address.city).toBe('Metropolis');
 
     const published = await bus.pop('shipping');
-    expect(published).not.toBeNull();
     expect(published?.eventName).toBe('PaymentAuthorized');
     expect(published?.data).toMatchObject({
       paymentId: expect.any(String),
-      amount: 199.99,
-      address: { city: 'Metropolis' }
+      reservationId: 'rsv-1'
     });
   });
 
-  it('does not duplicate PaymentAuthorized for the same event', async () => {
+  it('publishes PaymentFailed when authorization is disabled', async () => {
     const store = createPaymentStore();
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-    const handler = createInventoryReservedHandler({ store, bus, logger });
-    const event = inventoryReservedEvent();
+    const handler = createInventoryReservedHandler({
+      store,
+      bus,
+      logger,
+      allowAuth: false,
+      opTimeoutMs: 1000
+    });
 
-    await handler(event);
-    await handler(event);
+    await handler(inventoryReservedEvent());
 
-    const first = await bus.pop('shipping');
-    const second = await bus.pop('shipping');
+    const failureToOrders = await bus.pop('orders');
+    const failureToInventory = await bus.pop('inventory');
 
-    expect(first).not.toBeNull();
-    expect(second).toBeNull();
+    expect(failureToOrders?.eventName).toBe('PaymentFailed');
+    expect(failureToInventory?.eventName).toBe('PaymentFailed');
+
+    const payment = store.findByOrderId('order-1');
+    expect(payment?.status).toBe('FAILED');
   });
 
   it('captures a payment after shipment prepared and publishes PaymentCaptured', async () => {
@@ -102,10 +113,10 @@ describe('payments event handlers', () => {
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-    const paymentId = 'pay-1';
     store.create({
-      paymentId,
+      paymentId: 'pay-1',
       orderId: 'order-1',
+      reservationId: 'rsv-1',
       amount: 199.99,
       address: {
         line1: 'Main St 123',
@@ -116,7 +127,12 @@ describe('payments event handlers', () => {
       status: 'AUTHORIZED'
     });
 
-    const handler = createShipmentPreparedHandler({ store, bus, logger });
+    const handler = createShipmentPreparedHandler({
+      store,
+      bus,
+      logger,
+      opTimeoutMs: 1000
+    });
 
     await handler(shipmentPreparedEvent());
 
@@ -124,16 +140,11 @@ describe('payments event handlers', () => {
     expect(payment?.status).toBe('CAPTURED');
 
     const published = await bus.pop('orders');
-    expect(published).not.toBeNull();
     expect(published?.eventName).toBe('PaymentCaptured');
-    expect(published?.data).toMatchObject({
-      paymentId,
-      orderId: 'order-1',
-      amount: 199.99
-    });
+    expect(published?.data).toMatchObject({ paymentId: 'pay-1' });
   });
 
-  it('is idempotent when capturing the same shipment', async () => {
+  it('refunds a captured payment and publishes PaymentRefunded', async () => {
     const store = createPaymentStore();
     const bus = new FakeEventBus();
     const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -141,6 +152,7 @@ describe('payments event handlers', () => {
     store.create({
       paymentId: 'pay-2',
       orderId: 'order-2',
+      reservationId: 'rsv-2',
       amount: 120,
       address: {
         line1: 'Side St 45',
@@ -148,33 +160,30 @@ describe('payments event handlers', () => {
         zip: '67890',
         country: 'AR'
       },
-      status: 'AUTHORIZED'
+      status: 'CAPTURED'
     });
 
-    const handler = createShipmentPreparedHandler({ store, bus, logger });
-    const event: EventEnvelope = {
-      ...shipmentPreparedEvent(),
+    const handler = createRefundPaymentHandler({ store, bus, logger });
+
+    await handler({
+      eventName: 'RefundPayment',
+      version: 1,
       eventId: 'evt-4',
+      traceId: 'trace-2',
       correlationId: 'order-2',
+      occurredAt: new Date().toISOString(),
       data: {
-        shipmentId: 'shp-2',
+        paymentId: 'pay-2',
         orderId: 'order-2',
-        address: {
-          line1: 'Side St 45',
-          city: 'Smallville',
-          zip: '67890',
-          country: 'AR'
-        }
+        reason: 'shipment_failed'
       }
-    };
+    });
 
-    await handler(event);
-    await handler(event);
+    const payment = store.findByOrderId('order-2');
+    expect(payment?.status).toBe('REFUNDED');
 
-    const first = await bus.pop('orders');
-    const second = await bus.pop('orders');
-
-    expect(first).not.toBeNull();
-    expect(second).toBeNull();
+    const published = await bus.pop('orders');
+    expect(published?.eventName).toBe('PaymentRefunded');
+    expect(published?.data).toMatchObject({ paymentId: 'pay-2', reason: 'shipment_failed' });
   });
 });

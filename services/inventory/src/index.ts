@@ -7,17 +7,33 @@ import { routes } from './http/routes.js';
 import { createDispatcher } from './events/dispatcher.js';
 import { createWorker } from './events/worker.js';
 import { createReservationStore } from './reservations.js';
-import { createOrderPlacedHandler } from './events/handlers.js';
+import { createOrderPlacedHandler, createReleaseStockHandler } from './events/handlers.js';
 
 const server = Fastify({ logger: true });
 const bus = createHttpEventBus(env.MESSAGE_QUEUE_URL);
 const dispatcher = createDispatcher(server.log);
 const store = createReservationStore();
-const worker = createWorker({ logger: server.log, dispatcher, bus });
+const worker = createWorker({
+  logger: server.log,
+  dispatcher,
+  bus,
+  pollIntervalMs: env.WORKER_POLL_MS
+});
 
 dispatcher.registerHandler(
   'OrderPlaced',
-  createOrderPlacedHandler({ store, bus, logger: server.log })
+  createOrderPlacedHandler({
+    store,
+    bus,
+    logger: server.log,
+    allowReservation: env.ALLOW_RESERVATION,
+    opTimeoutMs: env.OP_TIMEOUT_MS
+  })
+);
+
+dispatcher.registerHandler(
+  'ReleaseStock',
+  createReleaseStockHandler({ store, bus, logger: server.log })
 );
 
 worker.start();
