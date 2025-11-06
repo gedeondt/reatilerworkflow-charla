@@ -13,10 +13,12 @@ export async function routes(app: FastifyInstance) {
     return { status: 'ok' };
   });
 
-  app.post('/queues/:name:pop', async (req) => {
+  app.post('/queues/:name/pop', async (req) => {
     const { name } = paramsName.parse(req.params);
     const msg = pop(name);
-    if (!msg) return { status: 'empty' };
+    if (!msg) {
+      return { status: 'empty' };
+    }
     return { message: msg };
   });
 }

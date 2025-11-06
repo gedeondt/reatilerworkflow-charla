@@ -1,44 +1,50 @@
-import { afterEach, beforeAll, expect, it } from 'vitest';
-import http from 'http';
+import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
+import { buildServer } from '../src/server.js';
+import { _reset } from '../src/queue.js';
 
-const BASE = 'http://127.0.0.1:3005';
-function post(path: string, body?: unknown): Promise<{statusCode:number, text:string}> {
-  return new Promise((resolve, reject) => {
-    const data = body ? JSON.stringify(body) : '';
-    const req = http.request(BASE + path, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) }
-    }, (res) => {
-      let chunks = '';
-      res.on('data', (c) => chunks += c);
-      res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, text: chunks }));
-    });
-    req.on('error', reject);
-    if (data) req.write(data);
-    req.end();
-  });
-}
+const app = buildServer();
 
 beforeAll(async () => {
-  // Asumimos que el server ya corre en dev; estos tests son smoke externos.
+  await app.ready();
 });
-afterEach(() => { /* nada */ });
+
+afterAll(async () => {
+  await app.close();
+});
+
+afterEach(() => {
+  _reset();
+});
 
 it('health responde', async () => {
-  // GET con http simple
-  await new Promise<void>((resolve, reject) => {
-    http.get(BASE + '/health', (res) => {
-      expect(res.statusCode).toBe(200);
-      resolve();
-    }).on('error', reject);
-  });
+  const response = await app.inject({ method: 'GET', url: '/health' });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual({ status: 'ok', service: 'message-queue' });
 });
 
 it('push y pop funcionan', async () => {
-  const ev = { eventName:'Ping', version:1, eventId:'e1', traceId:'t1', correlationId:'c1', occurredAt:new Date().toISOString(), data:{} };
-  const r1 = await post('/queues/test/messages', ev);
-  expect(r1.statusCode).toBe(200);
-  const r2 = await post('/queues/test:pop');
-  expect(r2.statusCode).toBe(200);
-  expect(r2.text).toContain('"eventName":"Ping"');
+  const envelope = {
+    eventName: 'Ping',
+    version: 1 as const,
+    eventId: 'e1',
+    traceId: 't1',
+    correlationId: 'c1',
+    occurredAt: new Date().toISOString(),
+    data: {}
+  };
+
+  const pushResponse = await app.inject({
+    method: 'POST',
+    url: '/queues/test/messages',
+    payload: envelope
+  });
+  expect(pushResponse.statusCode).toBe(200);
+  expect(pushResponse.json()).toEqual({ status: 'ok' });
+
+  const popResponse = await app.inject({
+    method: 'POST',
+    url: '/queues/test/pop'
+  });
+  expect(popResponse.statusCode).toBe(200);
+  expect(popResponse.json()).toEqual({ message: envelope });
 });
