@@ -9,7 +9,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p .",
-    "test": "vitest run",
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:e2e": "RUN_E2E=true vitest run test/order-saga.e2e.spec.ts",
     "lint": "eslint . --ext .ts"
   },
   "dependencies": {

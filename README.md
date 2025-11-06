@@ -95,28 +95,35 @@ sequenceDiagram
     O-->>C: OrderConfirmed
 ```
 
-## Probar contratos
+
+## Pruebas
+
+### Unitarias
+
+Ejecutan los tests rápidos (incluyendo contratos compartidos y workers) sin habilitar los E2E.
 
 ```bash
-pnpm -F order test
-pnpm -F inventory test
-pnpm -F payments test
-pnpm -F shipping test
-pnpm -F message-queue test
+pnpm test:unit
+pnpm -F order test:unit
+pnpm -F inventory test:unit
+pnpm -F payments test:unit
+pnpm -F shipping test:unit
+pnpm -F message-queue test:unit
+pnpm -F @reatiler/shared test:unit
 ```
 
-## Smoke manual
+### End-to-end (happy path + smokes de compensación)
+
+Los recorridos de la SAGA se ejecutan en memoria usando `FakeEventBus`. Incluyen el happy path y los tres smokes de fallo.
 
 ```bash
-pnpm -F message-queue dev
-curl http://localhost:3005/health
-curl -X POST http://localhost:3005/queues/test/messages -H 'content-type: application/json' -d '{"eventName":"Ping","version":1,"eventId":"e1","traceId":"t1","correlationId":"c1","occurredAt":"2025-01-01T00:00:00Z","data":{}}'
-curl -X POST http://localhost:3005/queues/test/pop
+pnpm test:e2e           # orquesta todos los E2E disponibles
+pnpm -F order test:e2e  # ejecuta únicamente los recorridos end-to-end
 ```
 
-## Compensaciones
+### Smokes manuales
 
-Ejemplos rápidos para probar las ramas de fallo de la SAGA usando variables de entorno.
+Los mismos escenarios de compensación pueden explorarse a mano levantando los servicios y jugando con los toggles.
 
 ```bash
 pnpm dev
@@ -135,4 +142,10 @@ ALLOW_AUTH=false pnpm -F payments dev &
 # C) Fallo tardío en shipping → refund y cancelación
 ALLOW_PREPARE=false pnpm -F shipping dev &
 # POST /orders ... -> luego GET /orders/{id} -> status: CANCELLED
+
+# Para validar la cola manualmente
+pnpm -F message-queue dev
+curl http://localhost:3005/health
+curl -X POST http://localhost:3005/queues/test/messages -H 'content-type: application/json' -d '{"eventName":"Ping","version":1,"eventId":"e1","traceId":"t1","correlationId":"c1","occurredAt":"2025-01-01T00:00:00Z","data":{}}'
+curl -X POST http://localhost:3005/queues/test/pop
 ```

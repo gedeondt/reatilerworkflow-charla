@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "pnpm run test:unit && pnpm run test:e2e",
+    "test:unit": "turbo run test:unit",
+    "test:e2e": "turbo run test:e2e",
     "lint": "turbo run lint"
   },
   "devDependencies": {
