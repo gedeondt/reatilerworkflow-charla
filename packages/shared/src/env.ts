@@ -4,30 +4,30 @@ import { z } from './z.js';
 
 config();
 
-const messageQueueEnvSchema = z.object({
-  MESSAGE_QUEUE_URL: z.string().url()
-});
+const DEFAULT_MESSAGE_QUEUE_URL = 'http://localhost:3005';
 
-export type MessageQueueEnv = z.infer<typeof messageQueueEnvSchema>;
+const messageQueueUrlSchema = z.string().url();
 
-let cachedEnv: MessageQueueEnv | null = null;
+export function getMessageQueueUrl(): string {
+  const rawValue = process.env.MESSAGE_QUEUE_URL;
 
-export function loadMessageQueueEnv(overrides: Partial<MessageQueueEnv> = {}): MessageQueueEnv {
-  if (Object.keys(overrides).length > 0) {
-    return messageQueueEnvSchema.parse({
-      MESSAGE_QUEUE_URL: overrides.MESSAGE_QUEUE_URL ?? process.env.MESSAGE_QUEUE_URL
-    });
+  if (rawValue === undefined) {
+    return DEFAULT_MESSAGE_QUEUE_URL;
   }
 
-  if (!cachedEnv) {
-    cachedEnv = messageQueueEnvSchema.parse({
-      MESSAGE_QUEUE_URL: process.env.MESSAGE_QUEUE_URL
-    });
+  const trimmedValue = rawValue.trim();
+
+  if (!trimmedValue) {
+    return DEFAULT_MESSAGE_QUEUE_URL;
   }
 
-  return cachedEnv;
-}
+  try {
+    return messageQueueUrlSchema.parse(trimmedValue);
+  } catch (error) {
+    if (process.env.NODE_ENV === 'test' && trimmedValue === DEFAULT_MESSAGE_QUEUE_URL) {
+      return trimmedValue;
+    }
 
-export function getMessageQueueUrl(overrides: Partial<MessageQueueEnv> = {}): string {
-  return loadMessageQueueEnv(overrides).MESSAGE_QUEUE_URL;
+    throw error;
+  }
 }
