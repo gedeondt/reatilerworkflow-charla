@@ -1,0 +1,25 @@
+{
+  "name": "@reatiler/message-queue",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "types": "dist/server.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p .",
+    "test": "vitest run",
+    "lint": "eslint . --ext .ts"
+  },
+  "dependencies": {
+    "@reatiler/shared": "workspace:*",
+    "fastify": "^4.26.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.5",
+    "vitest": "^1.4.0"
+  }
+}

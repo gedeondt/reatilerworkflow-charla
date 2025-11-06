@@ -1,18 +1,25 @@
 # Order Service
 
-Servicio encargado de gestionar el ciclo de vida de los pedidos.
+Servicio HTTP encargado de coordinar órdenes de compra.
 
-## API mínima
-- `POST /orders`
-- `POST /orders/{id}/cancel`
-- `GET /orders/{id}`
+## Puerto
 
-## Responsabilidades
-- Registrar órdenes nuevas y emitir **OrderPlaced**.
-- Reaccionar a **PaymentCaptured** para confirmar pedidos.
-- Ejecutar compensaciones en caso de fallas (`OrderCancelled`, `OrderFailed`).
+- `PORT`: 3001 por defecto.
 
-## Pendientes
-- Definir modelo de dominio y estados.
-- Implementar almacenamiento in-memory idempotente.
-- Integrar con la Message Queue según los contratos establecidos.
+## Variables de entorno
+
+- `PORT`: Puerto HTTP para exponer la API.
+- `MESSAGE_QUEUE_URL`: URL base del servicio de colas (ej. `http://localhost:3005`).
+- `LOG_LEVEL`: Nivel de logs de Pino (opcional, `info` por defecto).
+
+## Ejemplo de verificación
+
+```bash
+curl http://localhost:3001/health
+```
+
+Respuesta esperada:
+
+```json
+{"status":"ok","service":"order"}
+```
