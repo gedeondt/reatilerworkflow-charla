@@ -28,6 +28,19 @@ Este monorepo establece la semántica base para un ecosistema de microservicios 
 pnpm install
 ```
 
+## Arranque local
+
+El entorno local levanta cinco procesos (cola de mensajes más cuatro dominios) mediante Turborepo.
+
+```bash
+pnpm i
+pnpm dev
+curl :3001/health
+curl :3005/health
+```
+
+Cada servicio expone `/health` devolviendo `{"status":"ok","service":"<nombre>"}` y escucha en los puertos 3001 al 3005.
+
 ## Puesta en marcha
 
 Cada servicio contará con scripts de desarrollo orquestados mediante Turborepo. Por ahora, los comandos son placeholders hasta que se implemente la lógica de cada dominio.

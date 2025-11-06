@@ -5,9 +5,20 @@
   "description": "Monorepo Spec-as-Source para servicios Order, Inventory, Payments, Shipping",
   "packageManager": "pnpm@8.15.0",
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --parallel",
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.0",
+    "eslint-import-resolver-typescript": "^3.6.1",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-unused-imports": "^3.1.0",
+    "prettier": "^3.2.5",
+    "turbo": "^1.12.3",
+    "typescript": "^5.4.5"
   }
 }

@@ -1,19 +1,25 @@
 # Payments Service
 
-Orquesta la autorización, captura y reembolsos de pagos asociados a órdenes.
+Servicio responsable de la orquestación de pagos.
 
-## API mínima
-- `POST /payments/authorize`
-- `POST /payments/capture`
-- `POST /payments/refund`
-- `GET /payments/{id}`
+## Puerto
 
-## Responsabilidades
-- Autorizar pagos cuando Inventory confirma la reserva (**InventoryReserved**).
-- Capturar pagos tras la preparación del envío (**ShipmentPrepared**).
-- Emitir reembolsos cuando Shipping falle después de capturar (**PaymentRefunded**).
+- `PORT`: 3003 por defecto.
 
-## Pendientes
-- Gestionar un store in-memory para transacciones.
-- Implementar lógica de compensación según flags de entorno.
-- Instrumentar trazas para seguimiento de `traceId` y `correlationId`.
+## Variables de entorno
+
+- `PORT`: Puerto HTTP.
+- `MESSAGE_QUEUE_URL`: URL del servicio de colas (predeterminado `http://localhost:3005`).
+- `LOG_LEVEL`: Nivel de logging opcional.
+
+## Ejemplo de verificación
+
+```bash
+curl http://localhost:3003/health
+```
+
+Respuesta esperada:
+
+```json
+{"status":"ok","service":"payments"}
+```

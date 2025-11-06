@@ -1,18 +1,25 @@
 # Shipping Service
 
-Responsable de preparar y despachar envíos derivados de las órdenes confirmadas.
+Servicio responsable de preparar envíos.
 
-## API mínima
-- `POST /shipments`
-- `POST /shipments/{id}/dispatch`
-- `GET /shipments/{id}`
+## Puerto
 
-## Responsabilidades
-- Crear envíos ante **PaymentAuthorized**.
-- Preparar y despachar envíos (**ShipmentPrepared**, **ShipmentDispatched**).
-- Emitir **ShipmentFailed** cuando no se pueda preparar y coordinar reembolsos.
+- `PORT`: 3004 por defecto.
 
-## Pendientes
-- Modelar estados del envío con almacenamiento en memoria.
-- Integrar con Message Queue usando los contratos definidos.
-- Exponer healthchecks y métricas básicas.
+## Variables de entorno
+
+- `PORT`: Puerto HTTP expuesto.
+- `MESSAGE_QUEUE_URL`: URL del servicio de colas (por defecto `http://localhost:3005`).
+- `LOG_LEVEL`: Nivel de logging opcional.
+
+## Ejemplo de verificación
+
+```bash
+curl http://localhost:3004/health
+```
+
+Respuesta esperada:
+
+```json
+{"status":"ok","service":"shipping"}
+```

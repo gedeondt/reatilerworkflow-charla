@@ -1,19 +1,25 @@
 # Inventory Service
 
-Gestiona reservas de inventario asociadas a órdenes.
+Servicio encargado de la gestión de inventario.
 
-## API mínima
-- `POST /reservations`
-- `POST /reservations/{id}/commit`
-- `POST /reservations/{id}/release`
-- `GET /reservations/{id}`
+## Puerto
 
-## Responsabilidades
-- Reservar stock cuando se recibe **OrderPlaced**.
-- Confirmar reservas al recibir **PaymentCaptured**.
-- Liberar stock ante fallas (**InventoryReleased**, **InventoryReservationFailed**).
+- `PORT`: 3002 por defecto.
 
-## Pendientes
-- Modelar inventario in-memory con control de idempotencia.
-- Exponer métricas de reservas activas y liberadas.
-- Alinear esquemas de eventos compartidos con `packages/shared`.
+## Variables de entorno
+
+- `PORT`: Puerto HTTP de escucha.
+- `MESSAGE_QUEUE_URL`: URL del servicio de colas (por defecto `http://localhost:3005`).
+- `LOG_LEVEL`: Nivel de logging opcional.
+
+## Ejemplo de verificación
+
+```bash
+curl http://localhost:3002/health
+```
+
+Respuesta esperada:
+
+```json
+{"status":"ok","service":"inventory"}
+```
