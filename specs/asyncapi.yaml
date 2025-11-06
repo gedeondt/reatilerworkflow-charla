@@ -173,10 +173,13 @@ components:
                   type: number
                   format: double
                   example: 149.99
+                address:
+                  $ref: '#/components/schemas/Address'
               required:
                 - orderId
                 - lines
                 - amount
+                - address
               additionalProperties: false
     OrderConfirmedEvent:
       allOf:
@@ -262,10 +265,18 @@ components:
                   type: array
                   items:
                     $ref: '#/components/schemas/ReservationItem'
+                amount:
+                  type: number
+                  format: double
+                  example: 149.99
+                address:
+                  $ref: '#/components/schemas/Address'
               required:
                 - reservationId
                 - orderId
                 - items
+                - amount
+                - address
               additionalProperties: false
     InventoryReservationFailedEvent:
       allOf:
@@ -343,10 +354,13 @@ components:
                   type: number
                   format: double
                   example: 149.99
+                address:
+                  $ref: '#/components/schemas/Address'
               required:
                 - paymentId
                 - orderId
                 - amount
+                - address
               additionalProperties: false
     PaymentCapturedEvent:
       allOf:

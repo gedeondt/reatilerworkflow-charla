@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createDispatcher } from '../src/events/dispatcher.js';
-import type { EventEnvelope } from '../src/events/types.js';
+import type { EventEnvelope } from '@reatiler/shared';
 
 describe('payments dispatcher', () => {
   const baseEvent: EventEnvelope = {

@@ -1,20 +1,10 @@
-import { request as httpRequest } from 'node:http';
+import { request as httpRequest, type OutgoingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { URL } from 'node:url';
 
 import { z } from './z.js';
 import { getMessageQueueUrl } from './env.js';
-
-export type EventEnvelope = {
-  eventName: string;
-  version: 1;
-  eventId: string;
-  traceId: string;
-  correlationId: string;
-  occurredAt: string;
-  causationId?: string | null;
-  data: Record<string, unknown>;
-};
+import type { EventEnvelope } from './event-bus.js';
 
 const eventEnvelopeSchema = z
   .object({
@@ -44,7 +34,7 @@ async function sendRequest({ method, path, body }: RequestOptions): Promise<unkn
   const requester = isHttps ? httpsRequest : httpRequest;
 
   const serializedBody = body !== undefined ? JSON.stringify(body) : undefined;
-  const headers: NodeJS.OutgoingHttpHeaders = {};
+  const headers: OutgoingHttpHeaders = {};
 
   if (serializedBody !== undefined) {
     headers['content-type'] = 'application/json';

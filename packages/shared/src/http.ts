@@ -1,13 +1,14 @@
-import { request as httpRequest, RequestOptions as HttpRequestOptions } from 'node:http';
-import { request as httpsRequest, RequestOptions as HttpsRequestOptions } from 'node:https';
+import { request as httpRequest, type RequestOptions as HttpRequestOptions } from 'node:http';
+import { request as httpsRequest, type RequestOptions as HttpsRequestOptions } from 'node:https';
 import { URL } from 'node:url';
+import { Readable } from 'node:stream';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface HttpRequestOptionsExtended {
   method?: HttpMethod;
   headers?: Record<string, string>;
-  body?: string | Buffer | NodeJS.ReadableStream | Record<string, unknown>;
+  body?: string | Buffer | Readable | Record<string, unknown>;
   timeoutMs?: number;
 }
 
@@ -30,8 +31,13 @@ export async function httpFetch(urlString: string, options: HttpRequestOptionsEx
     path: `${url.pathname}${url.search}`
   };
 
-  let bodyToSend: string | Buffer | NodeJS.ReadableStream | undefined = options.body as any;
-  if (bodyToSend && typeof bodyToSend === 'object' && !(bodyToSend instanceof Buffer) && typeof (bodyToSend as NodeJS.ReadableStream).pipe !== 'function') {
+  let bodyToSend: string | Buffer | Readable | undefined = options.body as any;
+  if (
+    bodyToSend &&
+    typeof bodyToSend === 'object' &&
+    !(bodyToSend instanceof Buffer) &&
+    !(bodyToSend instanceof Readable)
+  ) {
     bodyToSend = JSON.stringify(bodyToSend);
     requestOptions.headers = {
       'content-type': 'application/json',
@@ -64,7 +70,7 @@ export async function httpFetch(urlString: string, options: HttpRequestOptionsEx
       });
     }
 
-    if (bodyToSend instanceof NodeJS.ReadableStream) {
+    if (bodyToSend instanceof Readable) {
       bodyToSend.pipe(req);
       return;
     }

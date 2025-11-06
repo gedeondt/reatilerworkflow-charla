@@ -1,4 +1,4 @@
-import type { EventEnvelope } from './types.js';
+import type { EventEnvelope } from '@reatiler/shared';
 
 type Logger = {
   info: (message: unknown, ...args: unknown[]) => void;

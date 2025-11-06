@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { routes } from './routes';
+import { routes } from './routes.js';
 
 export function buildServer() {
   const logLevel = process.env.LOG_LEVEL ?? 'warn';
