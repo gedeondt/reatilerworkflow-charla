@@ -1,36 +1,19 @@
 import Fastify from 'fastify';
+import { routes } from './routes';
 
-import { createLogger } from '@reatiler/shared/logger';
+const server = Fastify({
+  logger: true,
+  requestTimeout: 5000,
+  connectionTimeout: 5000
+});
 
-import { InMemoryQueue } from './queue.js';
-import { registerQueueRoutes } from './routes.js';
+server.get('/health', async () => ({ status: 'ok', service: 'message-queue' }));
+server.register(routes);
 
-export function buildServer(queue: InMemoryQueue = new InMemoryQueue()) {
-  const logger = createLogger({ service: 'message-queue' });
+const port = Number(process.env.PORT ?? 3005);
+server.listen({ port, host: '0.0.0.0' })
+  .then(() => server.log.info(`listening on ${port}`))
+  .catch((err) => { server.log.error(err); process.exit(1); });
 
-  const server = Fastify({
-    logger
-  });
-
-  server.get('/health', async () => ({ status: 'ok' }));
-
-  registerQueueRoutes(server, queue);
-
-  return server;
-}
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number.parseInt(process.env.PORT ?? '3005', 10);
-
-  const server = buildServer();
-
-  server
-    .listen({ port, host: '0.0.0.0' })
-    .then((address) => {
-      server.log.info(`message-queue service listening on ${address}`);
-    })
-    .catch((error) => {
-      server.log.error(error, 'Failed to start message-queue service');
-      process.exit(1);
-    });
-}
+process.on('SIGINT', () => server.close().then(() => process.exit(0)));
+process.on('SIGTERM', () => server.close().then(() => process.exit(0)));

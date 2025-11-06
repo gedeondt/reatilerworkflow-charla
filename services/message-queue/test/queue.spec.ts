@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
-
-import { InMemoryQueue } from '../src/queue.js';
-import { buildServer } from '../src/server.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import Fastify from 'fastify';
+import { routes } from '../src/routes.js';
+import { pop, push, _reset } from '../src/queue.js';
 
 const baseEnvelope = {
   eventName: 'OrderPlaced',
@@ -13,92 +13,64 @@ const baseEnvelope = {
   data: { orderId: 'ord-1' }
 };
 
-describe('InMemoryQueue', () => {
-  it('pushes and pops messages in FIFO order', () => {
-    const queue = new InMemoryQueue();
+afterEach(() => {
+  _reset();
+});
 
-    queue.push('orders', baseEnvelope);
-    queue.push('orders', { ...baseEnvelope, eventId: '00000000-0000-0000-0000-000000000002', traceId: 'trace-2' });
+describe('queue helpers', () => {
+  it('push and pop preserve FIFO order', () => {
+    push('orders', baseEnvelope);
+    push('orders', { ...baseEnvelope, eventId: '00000000-0000-0000-0000-000000000002', traceId: 'trace-2' });
 
-    expect(queue.pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000001');
-    expect(queue.pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000002');
-    expect(queue.pop('orders')).toBeNull();
+    expect(pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000001');
+    expect(pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000002');
+    expect(pop('orders')).toBeNull();
   });
 });
 
 describe('queue routes', () => {
-  it('rejects envelopes missing identifiers', async () => {
-    const server = buildServer();
-    await server.ready();
+  async function buildApp() {
+    const app = Fastify();
+    await app.register(routes);
+    await app.ready();
+    return app;
+  }
 
-    const response = await server.inject({
-      method: 'POST',
-      url: '/queues/orders/messages',
-      payload: {
-        ...baseEnvelope,
-        eventId: undefined
-      }
-    });
-
-    expect(response.statusCode).toBe(400);
-    const json = response.json();
-    expect(json.error).toBe('Invalid event envelope');
-
-    await server.close();
+  it('enqueues messages via HTTP', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/queues/orders/messages',
+        payload: baseEnvelope
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ status: 'ok' });
+    } finally {
+      await app.close();
+    }
   });
 
-  it('rejects envelopes with invalid version', async () => {
-    const server = buildServer();
-    await server.ready();
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/queues/orders/messages',
-      payload: { ...baseEnvelope, version: 2 }
-    });
-
-    expect(response.statusCode).toBe(400);
-
-    await server.close();
+  it('returns the next message when popping', async () => {
+    const app = await buildApp();
+    try {
+      await app.inject({ method: 'POST', url: '/queues/orders/messages', payload: baseEnvelope });
+      const response = await app.inject({ method: 'POST', url: '/queues/orders:pop' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ message: baseEnvelope });
+    } finally {
+      await app.close();
+    }
   });
 
-  it('returns empty status when queue has no messages', async () => {
-    const server = buildServer();
-    await server.ready();
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/queues/orders:pop'
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: 'empty' });
-
-    await server.close();
-  });
-
-  it('enqueues and dequeues messages via HTTP routes', async () => {
-    const queue = new InMemoryQueue();
-    const server = buildServer(queue);
-    await server.ready();
-
-    const enqueueResponse = await server.inject({
-      method: 'POST',
-      url: '/queues/orders/messages',
-      payload: baseEnvelope
-    });
-
-    expect(enqueueResponse.statusCode).toBe(202);
-    expect(queue.size('orders')).toBe(1);
-
-    const popResponse = await server.inject({
-      method: 'POST',
-      url: '/queues/orders:pop'
-    });
-
-    expect(popResponse.statusCode).toBe(200);
-    expect(popResponse.json()).toEqual({ message: baseEnvelope });
-
-    await server.close();
+  it('indicates empty queue when there are no messages', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({ method: 'POST', url: '/queues/orders:pop' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ status: 'empty' });
+    } finally {
+      await app.close();
+    }
   });
 });

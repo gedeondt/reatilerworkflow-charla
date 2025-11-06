@@ -1,22 +1,16 @@
 import Fastify from 'fastify';
-
-import { createLogger } from '@reatiler/shared';
-
+import { routes } from './http/routes.js';
 import { env } from './env.js';
 
-const server = Fastify({
-  logger: createLogger({ service: 'shipping', level: env.LOG_LEVEL })
-});
+const server = Fastify({ logger: true });
 
 server.get('/health', async () => ({ status: 'ok', service: 'shipping' }));
+server.register(routes);
 
-async function start() {
-  try {
-    await server.listen({ port: env.PORT, host: '0.0.0.0' });
-  } catch (error) {
-    server.log.error(error, 'Failed to start shipping service');
-    process.exit(1);
-  }
-}
+const port = env.PORT;
+server.listen({ port, host: '0.0.0.0' })
+  .then(() => server.log.info(`listening on ${port}`))
+  .catch((err) => { server.log.error(err); process.exit(1); });
 
-start();
+process.on('SIGINT', () => server.close().then(() => process.exit(0)));
+process.on('SIGTERM', () => server.close().then(() => process.exit(0)));

@@ -1,47 +1,22 @@
-import type { FastifyInstance } from 'fastify';
+import { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { envelopeSchema } from './types';
+import { push, pop } from './queue';
 
-import { InMemoryQueue } from './queue.js';
-import { EventEnvelopeSchema, type EventEnvelope } from './types.js';
+export async function routes(app: FastifyInstance) {
+  const paramsName = z.object({ name: z.string().min(1) });
 
-type QueueParams = {
-  name: string;
-};
-
-type PopQueueParams = {
-  name?: string;
-  'name:pop'?: string;
-};
-
-function resolveQueueName(params: PopQueueParams): string {
-  const rawName = params.name ?? params['name:pop'] ?? '';
-  return rawName.replace(/:pop$/, '');
-}
-
-export function registerQueueRoutes(server: FastifyInstance, queue: InMemoryQueue) {
-  server.post<{ Params: QueueParams; Body: unknown }>('/queues/:name/messages', async (request, reply) => {
-    const result = EventEnvelopeSchema.safeParse(request.body);
-
-    if (!result.success) {
-      return reply.status(400).send({
-        error: 'Invalid event envelope',
-        issues: result.error.flatten()
-      });
-    }
-
-    const envelope: EventEnvelope = result.data;
-    queue.push(request.params.name, envelope);
-
-    return reply.status(202).send({ status: 'enqueued' });
+  app.post('/queues/:name/messages', async (req) => {
+    const { name } = paramsName.parse(req.params);
+    const body = envelopeSchema.parse(req.body);
+    push(name, body);
+    return { status: 'ok' };
   });
 
-  server.post<{ Params: PopQueueParams }>('/queues/:name:pop', async (request, reply) => {
-    const queueName = resolveQueueName(request.params);
-    const message = queue.pop(queueName);
-
-    if (!message) {
-      return reply.send({ status: 'empty' });
-    }
-
-    return reply.send({ message });
+  app.post('/queues/:name:pop', async (req) => {
+    const { name } = paramsName.parse(req.params);
+    const msg = pop(name);
+    if (!msg) return { status: 'empty' };
+    return { message: msg };
   });
 }

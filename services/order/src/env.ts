@@ -1,9 +1,11 @@
-import { loadEnv, portSchema, queueUrlSchema } from '@reatiler/shared';
+import { z } from 'zod';
 
-export const env = loadEnv(
-  {
-    PORT: portSchema.default(3001),
-    MESSAGE_QUEUE_URL: queueUrlSchema
-  },
-  { PORT: 3001, MESSAGE_QUEUE_URL: 'http://localhost:3005' }
-);
+const envSchema = z.object({
+  PORT: z.coerce.number().refine((value) => value === 3001, { message: 'PORT must be 3001' }),
+  MESSAGE_QUEUE_URL: z.string().url()
+});
+
+export const env = envSchema.parse({
+  PORT: process.env.PORT ?? 3001,
+  MESSAGE_QUEUE_URL: process.env.MESSAGE_QUEUE_URL ?? 'http://localhost:3005'
+});

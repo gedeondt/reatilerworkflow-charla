@@ -82,3 +82,22 @@ sequenceDiagram
     MQ-->>O: PaymentCaptured
     O-->>C: OrderConfirmed
 ```
+
+## Probar contratos
+
+```bash
+pnpm -F order test
+pnpm -F inventory test
+pnpm -F payments test
+pnpm -F shipping test
+pnpm -F message-queue test
+```
+
+## Smoke manual
+
+```bash
+pnpm -F message-queue dev
+curl http://localhost:3005/health
+curl -X POST http://localhost:3005/queues/test/messages -H 'content-type: application/json' -d '{"eventName":"Ping","version":1,"eventId":"e1","traceId":"t1","correlationId":"c1","occurredAt":"2025-01-01T00:00:00Z","data":{}}'
+curl -X POST http://localhost:3005/queues/test:pop -H 'content-type: application/json' --data-raw ''
+```
