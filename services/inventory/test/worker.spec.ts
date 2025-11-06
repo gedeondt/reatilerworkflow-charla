@@ -1,0 +1,65 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { FakeEventBus } from '@reatiler/shared/event-bus';
+
+import { createDispatcher } from '../src/events/dispatcher.js';
+import { createWorker } from '../src/events/worker.js';
+import type { EventEnvelope } from '../src/events/types.js';
+
+const waitUntil = async (predicate: () => boolean, timeout = 500) => {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeout) {
+    if (predicate()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error('timeout waiting for condition');
+};
+
+describe('inventory worker', () => {
+  const baseEvent: EventEnvelope = {
+    eventName: 'InventoryReserved',
+    version: 1,
+    eventId: 'evt-1',
+    traceId: 'trace-1',
+    correlationId: 'corr-1',
+    occurredAt: new Date().toISOString(),
+    data: {}
+  };
+
+  it('procesa eventos nuevos una sola vez', async () => {
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const dispatcher = createDispatcher(logger);
+    const dispatchSpy = vi.spyOn(dispatcher, 'dispatch');
+
+    const bus = new FakeEventBus();
+    const worker = createWorker({
+      logger,
+      dispatcher,
+      bus,
+      pollIntervalMs: 10
+    });
+
+    worker.start();
+
+    try {
+      await bus.push('inventory', baseEvent);
+      await waitUntil(() => dispatchSpy.mock.calls.length === 1);
+
+      await bus.push('inventory', baseEvent);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(dispatchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await worker.stop();
+    }
+  });
+});

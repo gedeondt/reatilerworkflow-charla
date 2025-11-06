@@ -50,6 +50,9 @@ importers:
 
   services/inventory:
     dependencies:
+      '@reatiler/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       fastify:
         specifier: ^4.26.2
         version: 4.29.1
@@ -100,6 +103,9 @@ importers:
 
   services/order:
     dependencies:
+      '@reatiler/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       fastify:
         specifier: ^4.26.2
         version: 4.29.1
@@ -128,6 +134,9 @@ importers:
 
   services/payments:
     dependencies:
+      '@reatiler/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       fastify:
         specifier: ^4.26.2
         version: 4.29.1
@@ -156,6 +165,9 @@ importers:
 
   services/shipping:
     dependencies:
+      '@reatiler/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       fastify:
         specifier: ^4.26.2
         version: 4.29.1
