@@ -12,7 +12,9 @@
   "scripts": {
     "build": "tsc -p .",
     "lint": "eslint src --ext .ts",
-    "test": "vitest run"
+    "test": "pnpm run test:unit",
+    "test:unit": "vitest run --passWithNoTests",
+    "test:e2e": "RUN_E2E=true vitest run --passWithNoTests"
   },
   "exports": {
     ".": "./src/index.ts",
