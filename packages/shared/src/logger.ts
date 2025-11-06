@@ -1,11 +1,10 @@
-import pino, { LoggerOptions } from 'pino';
-import type { LevelWithSilent } from 'pino';
+import { pino as createPino, type Logger as PinoLogger, type LoggerOptions, type LevelWithSilent } from 'pino';
 
 export type CreateLoggerOptions = LoggerOptions & {
   service?: string;
 };
 
-export type Logger = ReturnType<typeof createLogger>;
+export type Logger = PinoLogger;
 
 export function createLogger(options: CreateLoggerOptions = {}): Logger {
   const { service, level, ...rest } = options;
@@ -20,7 +19,7 @@ export function createLogger(options: CreateLoggerOptions = {}): Logger {
     loggerOptions.name = service;
   }
 
-  return pino(loggerOptions);
+  return createPino(loggerOptions);
 }
 
 export const logger = createLogger();

@@ -4,7 +4,7 @@ import { FakeEventBus } from '@reatiler/shared/event-bus';
 
 import { createDispatcher } from '../src/events/dispatcher.js';
 import { createWorker } from '../src/events/worker.js';
-import type { EventEnvelope } from '../src/events/types.js';
+import type { EventEnvelope } from '@reatiler/shared';
 
 const waitUntil = async (predicate: () => boolean, timeout = 500) => {
   const startedAt = Date.now();

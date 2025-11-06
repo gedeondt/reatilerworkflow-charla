@@ -1,13 +1,24 @@
 import Fastify from 'fastify';
 
+import { createHttpEventBus } from '@reatiler/shared';
+
 import { env } from './env.js';
 import { routes } from './http/routes.js';
 import { createDispatcher } from './events/dispatcher.js';
 import { createWorker } from './events/worker.js';
+import { createShipmentStore } from './shipments.js';
+import { createPaymentAuthorizedHandler } from './events/handlers.js';
 
 const server = Fastify({ logger: true });
+const bus = createHttpEventBus(env.MESSAGE_QUEUE_URL);
 const dispatcher = createDispatcher(server.log);
-const worker = createWorker({ logger: server.log, dispatcher });
+const store = createShipmentStore();
+const worker = createWorker({ logger: server.log, dispatcher, bus });
+
+dispatcher.registerHandler(
+  'PaymentAuthorized',
+  createPaymentAuthorizedHandler({ store, bus, logger: server.log })
+);
 
 worker.start();
 
@@ -17,7 +28,7 @@ server.get('/health', async () => ({
   worker: worker.isRunning() ? 'up' : 'down'
 }));
 
-server.register(routes);
+server.register(async (app) => routes(app, { logger: server.log }));
 
 const port = env.PORT;
 

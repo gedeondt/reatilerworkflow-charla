@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { envelopeSchema } from './types';
-import { push, pop } from './queue';
+import { envelopeSchema } from './types.js';
+import { push, pop } from './queue.js';
 
 export async function routes(app: FastifyInstance) {
   const paramsName = z.object({ name: z.string().min(1) });

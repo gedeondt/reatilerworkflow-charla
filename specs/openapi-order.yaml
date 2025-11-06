@@ -71,6 +71,8 @@ components:
           type: number
           format: double
           example: 149.99
+        address:
+          $ref: '#/components/schemas/Address'
         status:
           type: string
           enum:
@@ -83,6 +85,7 @@ components:
         - orderId
         - lines
         - amount
+        - address
         - status
       additionalProperties: false
     OrderLine:
@@ -116,10 +119,13 @@ components:
           type: number
           format: double
           example: 149.99
+        address:
+          $ref: '#/components/schemas/Address'
       required:
         - requestId
         - lines
         - amount
+        - address
       additionalProperties: false
     CreateOrderResponse:
       type: object
@@ -162,3 +168,25 @@ components:
     GetOrderResponse:
       allOf:
         - $ref: '#/components/schemas/Order'
+    Address:
+      type: object
+      description: Dirección de entrega asociada al pedido.
+      properties:
+        line1:
+          type: string
+          example: Calle Falsa 123
+        city:
+          type: string
+          example: Ciudad Gótica
+        zip:
+          type: string
+          example: '12345'
+        country:
+          type: string
+          example: AR
+      required:
+        - line1
+        - city
+        - zip
+        - country
+      additionalProperties: false

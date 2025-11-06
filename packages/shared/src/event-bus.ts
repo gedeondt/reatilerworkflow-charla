@@ -1,4 +1,4 @@
-import { request as httpRequest } from 'node:http';
+import { request as httpRequest, type OutgoingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { URL } from 'node:url';
 
@@ -53,7 +53,7 @@ async function sendRequest(baseUrl: URL, { method, path, body }: RequestOptions)
   const url = new URL(path, baseUrl);
   const requester = getRequester(url);
   const serializedBody = body !== undefined ? JSON.stringify(body) : undefined;
-  const headers: NodeJS.OutgoingHttpHeaders = {};
+  const headers: OutgoingHttpHeaders = {};
 
   if (serializedBody !== undefined) {
     headers['content-type'] = 'application/json';

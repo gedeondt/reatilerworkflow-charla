@@ -1,7 +1,12 @@
 import { FastifyInstance } from 'fastify';
+
 import { AuthorizePaymentRequest, PaymentActionRequest, PaymentIdParams } from './schemas.js';
 
-export async function routes(app: FastifyInstance) {
+type RoutesDependencies = {
+  logger: FastifyInstance['log'];
+};
+
+export async function routes(app: FastifyInstance, _deps: RoutesDependencies) {
   app.post('/payments/authorize', async (req, reply) => {
     const body = AuthorizePaymentRequest.safeParse(req.body);
     if (!body.success) {

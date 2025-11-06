@@ -1,7 +1,12 @@
 import { FastifyInstance } from 'fastify';
+
 import { CreateShipmentRequest, ShipmentIdParams } from './schemas.js';
 
-export async function routes(app: FastifyInstance) {
+type RoutesDependencies = {
+  logger: FastifyInstance['log'];
+};
+
+export async function routes(app: FastifyInstance, _deps: RoutesDependencies) {
   app.post('/shipments', async (req, reply) => {
     const body = CreateShipmentRequest.safeParse(req.body);
     if (!body.success) {
