@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import Fastify from 'fastify';
-import { routes } from '../src/routes.js';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { buildServer } from '../src/server.js';
 import { pop, push, _reset } from '../src/queue.js';
 
 const baseEnvelope = {
@@ -29,48 +28,36 @@ describe('queue helpers', () => {
 });
 
 describe('queue routes', () => {
-  async function buildApp() {
-    const app = Fastify();
-    await app.register(routes);
+  const app = buildServer();
+
+  beforeAll(async () => {
     await app.ready();
-    return app;
-  }
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
 
   it('enqueues messages via HTTP', async () => {
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'POST',
-        url: '/queues/orders/messages',
-        payload: baseEnvelope
-      });
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ status: 'ok' });
-    } finally {
-      await app.close();
-    }
+    const response = await app.inject({
+      method: 'POST',
+      url: '/queues/orders/messages',
+      payload: baseEnvelope
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'ok' });
   });
 
   it('returns the next message when popping', async () => {
-    const app = await buildApp();
-    try {
-      await app.inject({ method: 'POST', url: '/queues/orders/messages', payload: baseEnvelope });
-      const response = await app.inject({ method: 'POST', url: '/queues/orders:pop' });
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ message: baseEnvelope });
-    } finally {
-      await app.close();
-    }
+    await app.inject({ method: 'POST', url: '/queues/orders/messages', payload: baseEnvelope });
+    const response = await app.inject({ method: 'POST', url: '/queues/orders/pop' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ message: baseEnvelope });
   });
 
   it('indicates empty queue when there are no messages', async () => {
-    const app = await buildApp();
-    try {
-      const response = await app.inject({ method: 'POST', url: '/queues/orders:pop' });
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ status: 'empty' });
-    } finally {
-      await app.close();
-    }
+    const response = await app.inject({ method: 'POST', url: '/queues/orders/pop' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'empty' });
   });
 });

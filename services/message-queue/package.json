@@ -5,9 +5,11 @@
   "type": "module",
   "main": "dist/server.js",
   "types": "dist/server.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch src/start.ts",
     "build": "tsc -p .",
     "test": "vitest run",
     "lint": "eslint . --ext .ts"
