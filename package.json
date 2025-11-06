@@ -1,0 +1,13 @@
+{
+  "name": "reatiler-workflow-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Monorepo Spec-as-Source para servicios Order, Inventory, Payments, Shipping",
+  "packageManager": "pnpm@8.15.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint"
+  }
+}

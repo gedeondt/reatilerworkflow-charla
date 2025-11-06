@@ -1,0 +1,4 @@
+# CODEOWNERS define los responsables de revisar cambios en áreas específicas
+/docs/ @arquitectura
+/services/ @equipo-dominio
+/packages/shared @plataforma
