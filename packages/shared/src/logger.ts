@@ -1,22 +1,26 @@
 import pino, { LoggerOptions } from 'pino';
+import type { LevelWithSilent } from 'pino';
 
-type LogLevel = pino.Level | 'silent';
-
-type LoggerConfig = {
+export type CreateLoggerOptions = LoggerOptions & {
   service?: string;
-  level?: LogLevel;
-  options?: LoggerOptions;
 };
 
-export function createLogger(config: LoggerConfig = {}) {
-  const { service = 'app', level, options } = config;
-  const resolvedLevel = level ?? ((process.env.LOG_LEVEL as LogLevel) || 'info');
+export type Logger = ReturnType<typeof createLogger>;
 
-  return pino({
-    name: service,
+export function createLogger(options: CreateLoggerOptions = {}): Logger {
+  const { service, level, ...rest } = options;
+  const resolvedLevel = (level ?? (process.env.LOG_LEVEL as LevelWithSilent | undefined) ?? 'info') as LevelWithSilent;
+
+  const loggerOptions: LoggerOptions = {
     level: resolvedLevel,
-    ...options
-  });
+    ...rest
+  };
+
+  if (service && !loggerOptions.name) {
+    loggerOptions.name = service;
+  }
+
+  return pino(loggerOptions);
 }
 
-export type Logger = ReturnType<typeof createLogger>;
+export const logger = createLogger();

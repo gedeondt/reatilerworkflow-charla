@@ -1,30 +1,25 @@
 # Message Queue Service
 
-Servicio in-memory responsable de enrutar eventos entre los dominios Order, Inventory, Payments y Shipping.
+Servicio HTTP in-memory para administrar colas FIFO de eventos.
 
-## Puerto
-
-- `PORT`: 3005 por defecto.
-
-## Variables de entorno
-
-- `PORT`: Puerto HTTP del proceso.
-- `LOG_LEVEL`: Nivel de logging de Pino (`info` por defecto).
-
-## Endpoints disponibles
-
-- `GET /health`: Devuelve `{"status":"ok","service":"message-queue"}`.
-- `POST /queues/:name/messages`: Publica un `EventEnvelope` en la cola indicada.
-- `POST /queues/:name/pop`: Obtiene el siguiente mensaje de la cola (FIFO).
-
-## Ejemplo de verificación
+## Ejecutar en desarrollo
 
 ```bash
-curl http://localhost:3005/health
+pnpm -F message-queue dev
 ```
 
-Respuesta esperada:
+## Endpoints
 
-```json
-{"status":"ok","service":"message-queue"}
+- `GET /health`
+- `POST /queues/:name/messages`
+- `POST /queues/:name:pop`
+
+## Ejemplos
+
+```bash
+curl -X POST :3005/queues/test/messages \
+  -H 'content-type: application/json' \
+  -d '{"eventName":"Ping","version":1,"eventId":"e1","traceId":"t1","correlationId":"c1","occurredAt":"2025-01-01T00:00:00Z","data":{}}'
+
+curl -X POST :3005/queues/test:pop
 ```
