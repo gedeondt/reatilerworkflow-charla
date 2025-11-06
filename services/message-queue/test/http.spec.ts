@@ -48,3 +48,13 @@ it('push y pop funcionan', async () => {
   expect(popResponse.statusCode).toBe(200);
   expect(popResponse.json()).toEqual({ message: envelope });
 });
+
+it('permite hacer pop sin body ni content-type cuando está vacía', async () => {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/queues/test/pop'
+  });
+
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toEqual({ status: 'empty' });
+});

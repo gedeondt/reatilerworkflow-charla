@@ -62,4 +62,34 @@ describe('inventory worker', () => {
       await worker.stop();
     }
   });
+
+  it('sigue en ejecución cuando la cola está vacía sin loguear errores', async () => {
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn()
+    };
+    const dispatcher = createDispatcher(logger);
+    const dispatchSpy = vi.spyOn(dispatcher, 'dispatch');
+
+    const bus = new FakeEventBus();
+    const popSpy = vi.spyOn(bus, 'pop');
+    const worker = createWorker({
+      logger,
+      dispatcher,
+      bus,
+      pollIntervalMs: 10
+    });
+
+    worker.start();
+
+    try {
+      await waitUntil(() => popSpy.mock.calls.length >= 2);
+      expect(worker.isRunning()).toBe(true);
+      expect(dispatchSpy).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+    } finally {
+      await worker.stop();
+    }
+  });
 });
