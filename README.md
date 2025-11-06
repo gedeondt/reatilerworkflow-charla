@@ -109,3 +109,26 @@ curl http://localhost:3005/health
 curl -X POST http://localhost:3005/queues/test/messages -H 'content-type: application/json' -d '{"eventName":"Ping","version":1,"eventId":"e1","traceId":"t1","correlationId":"c1","occurredAt":"2025-01-01T00:00:00Z","data":{}}'
 curl -X POST http://localhost:3005/queues/test/pop
 ```
+
+## Compensaciones
+
+Ejemplos rápidos para probar las ramas de fallo de la SAGA usando variables de entorno.
+
+```bash
+pnpm dev
+
+# A) Fallo en reserva de inventario
+ALLOW_RESERVATION=false pnpm -F inventory dev &
+curl -s -X POST http://localhost:3001/orders \
+  -H 'content-type: application/json' \
+  -d '{"requestId":"r2","lines":[{"sku":"SKU1","qty":1}],"amount":100,"address":{"line1":"Calle 1","city":"Madrid","zip":"28001","country":"ES"}}' | jq
+# GET /orders/{id} -> status: FAILED
+
+# B) Fallo en autorización de pago → stock liberado, pedido cancelado
+ALLOW_AUTH=false pnpm -F payments dev &
+# POST /orders ... -> luego GET /orders/{id} -> status: CANCELLED
+
+# C) Fallo tardío en shipping → refund y cancelación
+ALLOW_PREPARE=false pnpm -F shipping dev &
+# POST /orders ... -> luego GET /orders/{id} -> status: CANCELLED
+```

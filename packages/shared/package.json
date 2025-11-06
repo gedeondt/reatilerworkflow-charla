@@ -22,7 +22,8 @@
     "./event-bus-client": "./src/event-bus-client.ts",
     "./event-bus": "./src/event-bus.ts",
     "./idempotency": "./src/idempotency.ts",
-    "./worker": "./src/worker.ts"
+    "./worker": "./src/worker.ts",
+    "./async": "./src/async.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

@@ -10,7 +10,8 @@ export type PaymentRecord = {
   orderId: string;
   amount: number;
   address: Address;
-  status: 'AUTHORIZED' | 'CAPTURED' | 'FAILED';
+  reservationId: string;
+  status: 'AUTHORIZED' | 'CAPTURED' | 'FAILED' | 'REFUNDED';
 };
 
 export type PaymentStore = {

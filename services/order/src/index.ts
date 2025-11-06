@@ -7,17 +7,54 @@ import { routes } from './http/routes.js';
 import { createDispatcher } from './events/dispatcher.js';
 import { createWorker } from './events/worker.js';
 import { createOrderStore } from './orders.js';
-import { createPaymentCapturedHandler } from './events/handlers.js';
+import {
+  createInventoryReservedHandler,
+  createInventoryReservationFailedHandler,
+  createPaymentFailedHandler,
+  createPaymentCapturedHandler,
+  createInventoryReleasedHandler,
+  createPaymentRefundedHandler
+} from './events/handlers.js';
 
 const server = Fastify({ logger: true });
 const bus = createHttpEventBus(env.MESSAGE_QUEUE_URL);
 const dispatcher = createDispatcher(server.log);
 const store = createOrderStore();
-const worker = createWorker({ logger: server.log, dispatcher, bus });
+const worker = createWorker({
+  logger: server.log,
+  dispatcher,
+  bus,
+  pollIntervalMs: env.WORKER_POLL_MS
+});
+
+dispatcher.registerHandler(
+  'InventoryReserved',
+  createInventoryReservedHandler({ store, logger: server.log })
+);
+
+dispatcher.registerHandler(
+  'InventoryReservationFailed',
+  createInventoryReservationFailedHandler({ store, bus, logger: server.log })
+);
+
+dispatcher.registerHandler(
+  'PaymentFailed',
+  createPaymentFailedHandler({ store, bus, logger: server.log })
+);
 
 dispatcher.registerHandler(
   'PaymentCaptured',
   createPaymentCapturedHandler({ store, bus, logger: server.log })
+);
+
+dispatcher.registerHandler(
+  'InventoryReleased',
+  createInventoryReleasedHandler({ store, bus, logger: server.log })
+);
+
+dispatcher.registerHandler(
+  'PaymentRefunded',
+  createPaymentRefundedHandler({ store, bus, logger: server.log })
 );
 
 worker.start();

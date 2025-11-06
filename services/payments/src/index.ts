@@ -9,23 +9,45 @@ import { createWorker } from './events/worker.js';
 import { createPaymentStore } from './payments.js';
 import {
   createInventoryReservedHandler,
-  createShipmentPreparedHandler
+  createShipmentPreparedHandler,
+  createRefundPaymentHandler
 } from './events/handlers.js';
 
 const server = Fastify({ logger: true });
 const bus = createHttpEventBus(env.MESSAGE_QUEUE_URL);
 const dispatcher = createDispatcher(server.log);
 const store = createPaymentStore();
-const worker = createWorker({ logger: server.log, dispatcher, bus });
+const worker = createWorker({
+  logger: server.log,
+  dispatcher,
+  bus,
+  pollIntervalMs: env.WORKER_POLL_MS
+});
 
 dispatcher.registerHandler(
   'InventoryReserved',
-  createInventoryReservedHandler({ store, bus, logger: server.log })
+  createInventoryReservedHandler({
+    store,
+    bus,
+    logger: server.log,
+    allowAuth: env.ALLOW_AUTH,
+    opTimeoutMs: env.OP_TIMEOUT_MS
+  })
 );
 
 dispatcher.registerHandler(
   'ShipmentPrepared',
-  createShipmentPreparedHandler({ store, bus, logger: server.log })
+  createShipmentPreparedHandler({
+    store,
+    bus,
+    logger: server.log,
+    opTimeoutMs: env.OP_TIMEOUT_MS
+  })
+);
+
+dispatcher.registerHandler(
+  'RefundPayment',
+  createRefundPaymentHandler({ store, bus, logger: server.log })
 );
 
 worker.start();
