@@ -28,6 +28,10 @@ Este monorepo establece la semántica base para un ecosistema de microservicios 
 pnpm install
 ```
 
+## Configuración rápida
+
+La configuración mediante un archivo `.env` es opcional. Por defecto, los servicios intentarán conectarse a la cola de mensajes en `http://localhost:3005`. Si necesitas personalizarla, copia [`./.env.example`](./.env.example) como `.env` en la raíz y ajusta las variables disponibles.
+
 ## Arranque local
 
 El entorno local levanta cinco procesos (cola de mensajes más cuatro dominios) mediante Turborepo.
