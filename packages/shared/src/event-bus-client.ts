@@ -44,6 +44,12 @@ async function sendRequest({ method, path, body }: RequestOptions): Promise<unkn
   const requester = isHttps ? httpsRequest : httpRequest;
 
   const serializedBody = body !== undefined ? JSON.stringify(body) : undefined;
+  const headers: NodeJS.OutgoingHttpHeaders = {};
+
+  if (serializedBody !== undefined) {
+    headers['content-type'] = 'application/json';
+    headers['content-length'] = Buffer.byteLength(serializedBody).toString();
+  }
 
   return new Promise((resolve, reject) => {
     const req = requester(
@@ -52,10 +58,7 @@ async function sendRequest({ method, path, body }: RequestOptions): Promise<unkn
         hostname: url.hostname,
         port: url.port || (isHttps ? 443 : 80),
         path: `${url.pathname}${url.search}`,
-        headers: {
-          'content-type': 'application/json',
-          ...(serializedBody ? { 'content-length': Buffer.byteLength(serializedBody).toString() } : {})
-        }
+        headers
       },
       (res) => {
         const chunks: Uint8Array[] = [];
@@ -111,7 +114,7 @@ export async function push(queue: string, event: EventEnvelope): Promise<void> {
 export async function pop(queue: string): Promise<EventEnvelope | null> {
   const response = (await sendRequest({
     method: 'POST',
-    path: `/queues/${encodeQueueName(queue)}:pop`
+    path: `/queues/${encodeQueueName(queue)}/pop`
   })) as unknown;
 
   if (!response) {

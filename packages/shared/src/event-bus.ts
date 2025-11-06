@@ -53,6 +53,12 @@ async function sendRequest(baseUrl: URL, { method, path, body }: RequestOptions)
   const url = new URL(path, baseUrl);
   const requester = getRequester(url);
   const serializedBody = body !== undefined ? JSON.stringify(body) : undefined;
+  const headers: NodeJS.OutgoingHttpHeaders = {};
+
+  if (serializedBody !== undefined) {
+    headers['content-type'] = 'application/json';
+    headers['content-length'] = Buffer.byteLength(serializedBody).toString();
+  }
 
   return new Promise((resolve, reject) => {
     const req = requester(
@@ -61,10 +67,7 @@ async function sendRequest(baseUrl: URL, { method, path, body }: RequestOptions)
         hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80),
         path: `${url.pathname}${url.search}`,
-        headers: {
-          'content-type': 'application/json',
-          ...(serializedBody ? { 'content-length': Buffer.byteLength(serializedBody).toString() } : {})
-        }
+        headers
       },
       (res) => {
         const chunks: Uint8Array[] = [];
@@ -121,7 +124,7 @@ export function createHttpEventBus(baseUrl: string): EventBus {
     async pop(queue: string): Promise<EventEnvelope | null> {
       const response = (await sendRequest(parsedBaseUrl, {
         method: 'POST',
-        path: `/queues/${encodeQueueName(queue)}:pop`
+        path: `/queues/${encodeQueueName(queue)}/pop`
       })) as unknown;
 
       if (!response) {
