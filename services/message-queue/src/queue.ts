@@ -1,32 +1,14 @@
-import { EventEnvelope } from './types.js';
-
-export class InMemoryQueue {
-  private readonly queues = new Map<string, EventEnvelope[]>();
-
-  push(queueName: string, message: EventEnvelope) {
-    const queue = this.queues.get(queueName) ?? [];
-    queue.push(message);
-    this.queues.set(queueName, queue);
-  }
-
-  pop(queueName: string): EventEnvelope | null {
-    const queue = this.queues.get(queueName);
-    if (!queue || queue.length === 0) {
-      return null;
-    }
-
-    const message = queue.shift() ?? null;
-
-    if (queue.length === 0) {
-      this.queues.delete(queueName);
-    } else {
-      this.queues.set(queueName, queue);
-    }
-
-    return message;
-  }
-
-  size(queueName: string) {
-    return this.queues.get(queueName)?.length ?? 0;
-  }
+import type { EventEnvelope } from './types';
+const queues = new Map<string, EventEnvelope[]>();
+export function push(name: string, ev: EventEnvelope) {
+  const q = queues.get(name) ?? [];
+  q.push(ev);
+  queues.set(name, q);
 }
+export function pop(name: string): EventEnvelope | null {
+  const q = queues.get(name) ?? [];
+  const msg = q.shift() ?? null;
+  queues.set(name, q);
+  return msg;
+}
+export function _reset() { queues.clear(); }

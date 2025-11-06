@@ -1,5 +1,5 @@
 {
-  "name": "@reatiler/message-queue",
+  "name": "message-queue",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,8 +13,8 @@
     "lint": "eslint . --ext .ts"
   },
   "dependencies": {
-    "@reatiler/shared": "workspace:*",
-    "fastify": "^4.26.2"
+    "fastify": "^4.26.2",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
