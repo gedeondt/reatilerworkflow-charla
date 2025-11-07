@@ -21,9 +21,13 @@ describe('queue helpers', () => {
     push('orders', baseEnvelope);
     push('orders', { ...baseEnvelope, eventId: '00000000-0000-0000-0000-000000000002', traceId: 'trace-2' });
 
-    expect(pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000001');
-    expect(pop('orders')?.eventId).toBe('00000000-0000-0000-0000-000000000002');
-    expect(pop('orders')).toBeNull();
+    expect(pop<typeof baseEnvelope>('orders')?.eventId).toBe(
+      '00000000-0000-0000-0000-000000000001'
+    );
+    expect(pop<typeof baseEnvelope>('orders')?.eventId).toBe(
+      '00000000-0000-0000-0000-000000000002'
+    );
+    expect(pop<typeof baseEnvelope>('orders')).toBeNull();
   });
 });
 
@@ -59,5 +63,15 @@ describe('queue routes', () => {
     const response = await app.inject({ method: 'POST', url: '/queues/orders/pop' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ status: 'empty' });
+  });
+
+  it('mirrors enqueued messages to the visualizer queue', async () => {
+    await app.inject({ method: 'POST', url: '/queues/orders/messages', payload: baseEnvelope });
+
+    const ordersMessage = pop<typeof baseEnvelope>('orders');
+    expect(ordersMessage).toEqual(baseEnvelope);
+
+    const mirrored = pop<{ queue: string; message: typeof baseEnvelope }>('visualizer');
+    expect(mirrored).toEqual({ queue: 'orders', message: baseEnvelope });
   });
 });
