@@ -66,10 +66,16 @@ importers:
       '@reatiler/shared':
         specifier: workspace:*
         version: link:../shared
+      blessed:
+        specifier: ^0.1.81
+        version: 0.1.81
       chalk:
         specifier: ^5.3.0
         version: 5.6.2
     devDependencies:
+      '@types/blessed':
+        specifier: ^0.1.25
+        version: 0.1.25
       tsx:
         specifier: ^4.7.1
         version: 4.20.6
@@ -1031,6 +1037,12 @@ packages:
     dev: true
     optional: true
 
+  /@types/blessed@0.1.25:
+    resolution: {integrity: sha512-kQsjBgtsbJLmG6CJA+Z6Nujj+tq1fcSE3UIowbDvzQI4wWmoTV7djUDhSo5lDjgwpIN0oRvks0SA5mMdKE5eFg==}
+    dependencies:
+      '@types/node': 20.19.24
+    dev: true
+
   /@types/cookiejar@2.1.5:
     resolution: {integrity: sha512-he+DHOWReW0nghN24E1WUqM0efK4kI9oTqDm6XmK8ZPe2djZ90BSNdGnIyCLzCPw7/pogPlGbzI2wHGGmi4O/Q==}
     dev: true
@@ -1613,6 +1625,12 @@ packages:
 
   /base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
+    dev: false
+
+  /blessed@0.1.81:
+    resolution: {integrity: sha512-LoF5gae+hlmfORcG1M5+5XZi4LBmvlXTzwJWzUlPryN/SJdSflZvROM2TwkT0GMpq7oqT48NRd4GS7BiVBc5OQ==}
+    engines: {node: '>= 0.8.0'}
+    hasBin: true
     dev: false
 
   /brace-expansion@1.1.12:
