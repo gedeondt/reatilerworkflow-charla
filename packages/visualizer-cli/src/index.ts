@@ -17,6 +17,9 @@ const VISUALIZER_QUEUE = 'visualizer';
 type QueueName = (typeof QUEUES)[number];
 type Domain = (typeof DOMAINS)[number];
 
+type DomainState = Record<Domain, string>;
+type DomainStateUpdate = { domain: Domain; state: string };
+
 type Flow = { from: Domain; to: Domain };
 
 const eventFlows: Record<string, Flow> = {
@@ -32,6 +35,29 @@ const eventFlows: Record<string, Flow> = {
   PaymentRefunded: { from: 'Payments', to: 'Order' },
   InventoryReleased: { from: 'Inventory', to: 'Order' }
 } as const;
+
+const INITIAL_DOMAIN_STATE: DomainState = {
+  Order: '',
+  Inventory: '',
+  Payments: '',
+  Shipping: ''
+};
+
+const EVENT_STATE_UPDATES: Partial<Record<string, DomainStateUpdate>> = {
+  OrderPlaced: { domain: 'Order', state: 'PLACED' },
+  OrderConfirmed: { domain: 'Order', state: 'CONFIRMED' },
+  OrderFailed: { domain: 'Order', state: 'FAILED' },
+  InventoryReserved: { domain: 'Inventory', state: 'RESERVED' },
+  InventoryReleased: { domain: 'Inventory', state: 'RELEASED' },
+  InventoryReservationFailed: { domain: 'Inventory', state: 'FAILED' },
+  PaymentAuthorized: { domain: 'Payments', state: 'AUTHORIZED' },
+  PaymentCaptured: { domain: 'Payments', state: 'CAPTURED' },
+  PaymentRefunded: { domain: 'Payments', state: 'REFUNDED' },
+  PaymentFailed: { domain: 'Payments', state: 'FAILED' },
+  ShipmentPrepared: { domain: 'Shipping', state: 'PREPARED' },
+  ShipmentDispatched: { domain: 'Shipping', state: 'DISPATCHED' },
+  ShipmentFailed: { domain: 'Shipping', state: 'FAILED' }
+};
 
 type EventClassification = 'success' | 'compensation' | 'failure' | 'other';
 
@@ -357,6 +383,30 @@ function start(): void {
   const { domainBoxes, eventLogBox } = createLayout(screen);
   const logLines: string[] = [];
   const highlightTimeouts = new Map<Domain, NodeJS.Timeout>();
+  const sagaStates = new Map<string, DomainState>();
+  let activeCorrelationId: string | null = null;
+
+  const getOrCreateSagaState = (correlationId: string): DomainState => {
+    const existing = sagaStates.get(correlationId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const initialState: DomainState = { ...INITIAL_DOMAIN_STATE };
+    sagaStates.set(correlationId, initialState);
+    return initialState;
+  };
+
+  const refreshDomainColumns = () => {
+    const activeState = activeCorrelationId ? sagaStates.get(activeCorrelationId) : undefined;
+
+    DOMAINS.forEach((domain) => {
+      const state = activeState?.[domain];
+      const content = state ? chalk.bold(state) : chalk.gray('-');
+      domainBoxes[domain].setContent(content);
+    });
+  };
 
   const appendLogLine = (line: string) => {
     logLines.push(line);
@@ -414,6 +464,18 @@ function start(): void {
     const colorizeEvent = classificationToChalk(classification);
     const flow = eventFlows[envelope.eventName];
     const orderId = extractOrderId(envelope.data);
+    const correlationId = envelope.correlationId;
+    const sagaState = getOrCreateSagaState(correlationId);
+
+    if (!activeCorrelationId) {
+      activeCorrelationId = correlationId;
+    }
+
+    const stateUpdate = EVENT_STATE_UPDATES[envelope.eventName];
+
+    if (stateUpdate) {
+      sagaState[stateUpdate.domain] = stateUpdate.state;
+    }
 
     const details: string[] = [`Order=${orderId}`, `Trace=${envelope.traceId}`];
 
@@ -426,6 +488,8 @@ function start(): void {
     )} (${details.join(', ')})`;
 
     appendLogLine(logLine);
+    refreshDomainColumns();
+    screen.render();
 
     if (flow) {
       highlightDomain(flow.from, classification);
@@ -450,6 +514,7 @@ function start(): void {
   screen.key(['C-c', 'q'], shutdown);
   process.once('SIGTERM', shutdown);
 
+  refreshDomainColumns();
   screen.render();
 }
 
