@@ -33,7 +33,7 @@ export type CreatePaymentCapturedHandlerOptions = {
   store: OrderStore;
   bus: EventBus;
   logger: Logger;
-  logQueue?: string;
+  eventQueue?: string;
 };
 
 export type CreateInventoryReleasedHandlerOptions = {
@@ -51,6 +51,7 @@ export type CreatePaymentRefundedHandlerOptions = {
 };
 
 const DEFAULT_LOG_QUEUE = 'orders-log';
+const ORDER_EVENTS_QUEUE = 'orders';
 const INVENTORY_QUEUE = 'inventory';
 
 function safeParse<N extends EventName>(
@@ -249,7 +250,7 @@ export function createPaymentCapturedHandler({
   store,
   bus,
   logger,
-  logQueue = DEFAULT_LOG_QUEUE
+  eventQueue = ORDER_EVENTS_QUEUE
 }: CreatePaymentCapturedHandlerOptions) {
   return async (event: EventEnvelope) => {
     const parsed = safeParse('PaymentCaptured', event, logger, 'invalid PaymentCaptured payload received');
@@ -296,7 +297,7 @@ export function createPaymentCapturedHandler({
       }
     );
 
-    await publishWithRetry(bus, logQueue, confirmationEvent, logger);
+    await publishWithRetry(bus, eventQueue, confirmationEvent, logger);
     logEvent(logger, envelope, 'order confirmed', {
       context: { orderId, paymentId }
     });

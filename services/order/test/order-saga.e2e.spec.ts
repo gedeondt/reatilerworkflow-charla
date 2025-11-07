@@ -165,7 +165,7 @@ describe.skipIf(!runE2E)('order saga e2e (fake bus)', () => {
 
     await ctx.handlers.order.paymentCaptured(paymentCaptured!);
 
-    const confirmation = await ctx.bus.pop('orders-log');
+    const confirmation = await ctx.bus.pop('orders');
     expect(confirmation?.eventName).toBe('OrderConfirmed');
 
     expect(ctx.stores.orderStore.get('order-1')?.status).toBe('CONFIRMED');
@@ -241,7 +241,7 @@ describe.skipIf(!runE2E)('order saga e2e (fake bus)', () => {
     expect(paymentCaptured?.eventName).toBe('PaymentCaptured');
 
     await ctx.handlers.order.paymentCaptured(paymentCaptured!);
-    await ctx.bus.pop('orders-log');
+    await ctx.bus.pop('orders');
 
     await ctx.handlers.shipping.failure(paymentAuthorized!);
 
