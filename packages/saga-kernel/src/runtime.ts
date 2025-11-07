@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { EventBus, EventEnvelope } from '@reatiler/shared/event-bus';
+import type { EventBus, EventEnvelope } from '@reatiler/shared';
 
 import type { Listener, ListenerAction, Scenario } from './schema.js';
 
@@ -37,7 +37,10 @@ export function createScenarioRuntime({
   logger,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS
 }: ScenarioRuntimeOptions): ScenarioRuntime {
-  const domainQueues = new Map(scenario.domains.map((domain) => [domain.id, domain.queue] as const));
+  const domainQueues = new Map<string, string>();
+  scenario.domains.forEach((domain) => {
+    domainQueues.set(domain.id, domain.queue);
+  });
   const listenersByEvent = new Map<string, Listener[]>();
 
   for (const listener of scenario.listeners) {

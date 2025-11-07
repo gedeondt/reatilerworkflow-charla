@@ -18,7 +18,7 @@ export type EventEnvelope = {
   data: Record<string, unknown>;
 };
 
-const eventEnvelopeSchema = z
+export const eventEnvelopeSchema = z
   .object({
     eventName: z.string(),
     version: z.literal(1),
@@ -155,58 +155,54 @@ export function createEnvEventBus(): EventBus {
   return createHttpEventBus(getMessageQueueUrl());
 }
 
-export function createEvent<N extends EventName>(
-  eventName: N,
-  data: EventData<N>,
-  {
-    traceId,
-    correlationId,
-    causationId
-  }: { traceId: string; correlationId: string; causationId?: string | null }
-): (EventEnvelope & { eventName: N; data: EventData<N> }) {
+export function createEvent<K extends EventName>(
+  eventName: K,
+  data: EventData<K>,
+  opts: { traceId: string; correlationId: string; causationId?: string | null }
+): EventEnvelope & { eventName: K; data: EventData<K> } {
   const schema = getEventSchema(eventName);
+  const parsedData = schema.parse(data) as EventData<K>;
 
-  const parsedData = schema.parse(data) as EventData<N>;
+  const { traceId, correlationId, causationId } = opts;
 
-  const envelope: EventEnvelope = {
+  const baseEnvelope: EventEnvelope = {
     eventName,
     version: 1,
     eventId: randomUUID(),
     traceId,
     correlationId,
     occurredAt: new Date().toISOString(),
-    data: parsedData
+    ...(causationId !== undefined ? { causationId } : {}),
+    data: parsedData as Record<string, unknown>
   };
 
-  if (typeof causationId === 'string' && causationId.length > 0) {
-    envelope.causationId = causationId;
-  }
+  const validatedEnvelope = eventEnvelopeSchema.parse(baseEnvelope);
 
-  return envelope as EventEnvelope & { eventName: N; data: EventData<N> };
+  return {
+    ...validatedEnvelope,
+    eventName,
+    data: parsedData
+  } as EventEnvelope & { eventName: K; data: EventData<K> };
 }
 
-export function parseEvent<N extends EventName>(
-  eventName: N,
+export function parseEvent<K extends EventName>(
+  expectedName: K,
   envelope: EventEnvelope
-): {
-  envelope: EventEnvelope & { eventName: N };
-  data: EventData<N>;
-} {
+): { envelope: EventEnvelope & { eventName: K }; data: EventData<K> } {
   const parsedEnvelope = eventEnvelopeSchema.parse(envelope);
 
-  if (parsedEnvelope.eventName !== eventName) {
+  if (parsedEnvelope.eventName !== expectedName) {
     throw new Error(
-      `Unexpected event received. Expected "${eventName}" but got "${parsedEnvelope.eventName}".`
+      `Unexpected event received. Expected "${expectedName}" but got "${parsedEnvelope.eventName}".`
     );
   }
 
-  const schema = getEventSchema(eventName);
-
-  const data = schema.parse(parsedEnvelope.data) as EventData<N>;
+  const schema = getEventSchema(expectedName);
+  const parsedData = schema.parse(parsedEnvelope.data) as EventData<K>;
 
   return {
-    envelope: parsedEnvelope as EventEnvelope & { eventName: N },
-    data
+    envelope: parsedEnvelope as EventEnvelope & { eventName: K },
+    data: parsedData
   };
 }
 
@@ -236,4 +232,3 @@ export class FakeEventBus implements EventBus {
   }
 }
 
-export { eventEnvelopeSchema };

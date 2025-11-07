@@ -130,11 +130,13 @@ export const eventDataSchemas = {
 } as const;
 
 export type EventName = keyof typeof eventDataSchemas;
-export type EventDataMap = {
-  [K in EventName]: z.infer<(typeof eventDataSchemas)[K]> & Record<string, unknown>;
-};
-export type EventData<N extends EventName> = EventDataMap[N];
 
-export function getEventSchema<N extends EventName>(eventName: N) {
-  return eventDataSchemas[eventName] as (typeof eventDataSchemas)[N];
+export type EventDataMap = {
+  [K in EventName]: z.infer<(typeof eventDataSchemas)[K]>;
+};
+
+export type EventData<K extends EventName = EventName> = EventDataMap[K];
+
+export function getEventSchema<K extends EventName>(eventName: K) {
+  return eventDataSchemas[eventName];
 }
