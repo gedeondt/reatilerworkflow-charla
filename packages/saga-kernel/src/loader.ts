@@ -1,40 +1,64 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { scenarioSchema, type Scenario } from './schema.js';
 
-function resolveScenarioPath(name: string): string {
-  // Siempre busca en `<cwd>/business/<name>.json`
-  return resolve(process.cwd(), 'business', `${name}.json`);
+const SCENARIO_DIR = 'business';
+
+function findScenarioPath(name: string, startDir: string): string | null {
+  const targetRelativePath = join(SCENARIO_DIR, `${name}.json`);
+
+  let currentDir: string | null = startDir;
+
+  while (currentDir) {
+    const candidate = join(currentDir, targetRelativePath);
+
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parentDir = dirname(currentDir);
+
+    if (parentDir === currentDir) {
+      break;
+    }
+
+    currentDir = parentDir;
+  }
+
+  return null;
+}
+
+function readScenarioFile(filePath: string): unknown {
+  const rawContent = readFileSync(filePath, 'utf8');
+
+  return JSON.parse(rawContent) as unknown;
 }
 
 export function loadScenario(name: string): Scenario {
-  const filePath = resolveScenarioPath(name);
+  const startDir = process.cwd();
+  const filePath = findScenarioPath(name, startDir);
 
-  let raw: string;
+  if (!filePath) {
+    throw new Error(`Scenario file "business/${name}.json" not found from ${startDir}.`);
+  }
+
+  let jsonContent: unknown;
+
   try {
-    raw = readFileSync(filePath, 'utf8');
+    jsonContent = readScenarioFile(filePath);
   } catch (error) {
     throw new Error(
-      `Failed to read scenario file "${name}" at ${filePath}: ${(error as Error).message}`
+      `Failed to read scenario file "${filePath}": ${(error as Error).message}`
     );
   }
 
-  let json: unknown;
-  try {
-    json = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(
-      `Invalid JSON in scenario file "${name}" at ${filePath}: ${(error as Error).message}`
-    );
+  const parsedScenario = scenarioSchema.safeParse(jsonContent);
+
+  if (!parsedScenario.success) {
+    const detail = parsedScenario.error.errors.map((issue) => issue.message).join('; ');
+    throw new Error(`Scenario validation failed for "${filePath}": ${detail}.`);
   }
 
-  try {
-    return scenarioSchema.parse(json);
-  } catch (error) {
-    if (error instanceof Error) {
-      throw new Error(`Scenario "${name}" does not match schema: ${error.message}`);
-    }
-    throw error;
-  }
+  return parsedScenario.data;
 }

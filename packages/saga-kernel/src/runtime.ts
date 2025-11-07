@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { EventBus, EventEnvelope } from '@reatiler/shared';
+import type { EventBus, EventEnvelope } from '@reatiler/shared/event-bus';
 
 import type { Listener, ListenerAction, Scenario } from './schema.js';
 
@@ -25,6 +25,11 @@ export type ScenarioRuntime = {
 
 const DEFAULT_POLL_INTERVAL_MS = 10;
 
+type WorkerController = {
+  stop(): void;
+  promise: Promise<void>;
+};
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -38,22 +43,23 @@ export function createScenarioRuntime({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS
 }: ScenarioRuntimeOptions): ScenarioRuntime {
   const domainQueues = new Map<string, string>();
-  scenario.domains.forEach((domain) => {
+
+  for (const domain of scenario.domains) {
     domainQueues.set(domain.id, domain.queue);
-  });
+  }
 
   const listenersByEvent = new Map<string, Listener[]>();
 
   for (const listener of scenario.listeners) {
-    const existing = listenersByEvent.get(listener.on.event) ?? [];
-    existing.push(listener);
-    listenersByEvent.set(listener.on.event, existing);
+    const listeners = listenersByEvent.get(listener.on.event) ?? [];
+    listeners.push(listener);
+    listenersByEvent.set(listener.on.event, listeners);
   }
 
   const state = new Map<string, Map<string, string>>();
 
   let running = false;
-  let workerControllers: Array<{ stop(): void; promise: Promise<void> }> = [];
+  const workers = new Map<string, WorkerController>();
 
   function updateState(correlationId: string, domainId: string, status: string): void {
     const domainState = state.get(correlationId) ?? new Map<string, string>();
@@ -61,34 +67,20 @@ export function createScenarioRuntime({
     state.set(correlationId, domainState);
   }
 
-  async function executeAction(action: ListenerAction, envelope: EventEnvelope): Promise<void> {
-    if (action.type === 'set-state') {
-      updateState(envelope.correlationId, action.domain, action.status);
-      logger.debug({
-        action: 'set-state',
-        correlationId: envelope.correlationId,
-        domain: action.domain,
-        status: action.status
-      });
-      return;
-    }
-
+  async function executeEmit(action: ListenerAction & { type: 'emit' }, envelope: EventEnvelope): Promise<void> {
     const targetQueue = domainQueues.get(action.toDomain);
 
     if (!targetQueue) {
       logger.error(
-        {
-          action: 'emit',
-          toDomain: action.toDomain
-        },
-        `Unable to emit event "${action.event}" because domain "${action.toDomain}" has no queue`
+        { action: 'emit', toDomain: action.toDomain },
+        `Unable to emit event "${action.event}" because domain "${action.toDomain}" has no queue.`
       );
       return;
     }
 
-    const traceId = envelope.traceId && envelope.traceId.length > 0 ? envelope.traceId : randomUUID();
+    const traceId = envelope.traceId || randomUUID();
 
-    const newEnvelope: EventEnvelope = {
+    const emittedEnvelope: EventEnvelope = {
       eventName: action.event,
       version: 1,
       eventId: randomUUID(),
@@ -99,7 +91,8 @@ export function createScenarioRuntime({
       data: envelope.data
     };
 
-    await bus.push(targetQueue, newEnvelope);
+    await bus.push(targetQueue, emittedEnvelope);
+
     logger.info(
       {
         action: 'emit',
@@ -107,8 +100,25 @@ export function createScenarioRuntime({
         event: action.event,
         correlationId: envelope.correlationId
       },
-      `Emitted event "${action.event}" to queue "${targetQueue}"`
+      `Emitted event "${action.event}" to queue "${targetQueue}".`
     );
+  }
+
+  async function executeAction(action: ListenerAction, envelope: EventEnvelope): Promise<void> {
+    if (action.type === 'set-state') {
+      updateState(envelope.correlationId, action.domain, action.status);
+
+      logger.debug({
+        action: 'set-state',
+        correlationId: envelope.correlationId,
+        domain: action.domain,
+        status: action.status
+      });
+
+      return;
+    }
+
+    await executeEmit(action, envelope);
   }
 
   async function executeListener(listener: Listener, envelope: EventEnvelope): Promise<void> {
@@ -125,12 +135,8 @@ export function createScenarioRuntime({
         await executeAction(action, envelope);
       } catch (error) {
         logger.error(
-          {
-            listener: listener.id,
-            action,
-            error
-          },
-          `Failed to execute action for listener "${listener.id}"`
+          { listener: listener.id, action, error },
+          `Failed to execute action for listener "${listener.id}".`
         );
       }
     }
@@ -142,7 +148,7 @@ export function createScenarioRuntime({
     if (!listeners || listeners.length === 0) {
       logger.debug(
         { event: envelope.eventName },
-        `No listeners registered for event "${envelope.eventName}"`
+        `No listeners registered for event "${envelope.eventName}".`
       );
       return;
     }
@@ -156,7 +162,7 @@ export function createScenarioRuntime({
     }
   }
 
-  function createQueueWorker(queueName: string): { stop(): void; promise: Promise<void> } {
+  function createQueueWorker(domainId: string, queueName: string): WorkerController {
     let stopped = false;
 
     const promise = (async () => {
@@ -171,7 +177,10 @@ export function createScenarioRuntime({
         try {
           envelope = await bus.pop(queueName);
         } catch (error) {
-          logger.error({ queue: queueName, error }, `Failed to pop event from queue "${queueName}"`);
+          logger.error(
+            { queue: queueName, domainId, error },
+            `Failed to pop event from queue "${queueName}".`
+          );
           await delay(pollIntervalMs);
           continue;
         }
@@ -188,7 +197,10 @@ export function createScenarioRuntime({
         try {
           await processEnvelope(envelope);
         } catch (error) {
-          logger.error({ queue: queueName, error }, `Error while processing event from "${queueName}"`);
+          logger.error(
+            { queue: queueName, domainId, error },
+            `Error while processing event from queue "${queueName}".`
+          );
         }
       }
     })();
@@ -201,6 +213,27 @@ export function createScenarioRuntime({
     };
   }
 
+  function startWorkers(): void {
+    for (const domain of scenario.domains) {
+      const existingWorker = workers.get(domain.id);
+
+      if (existingWorker) {
+        continue;
+      }
+
+      const controller = createQueueWorker(domain.id, domain.queue);
+      workers.set(domain.id, controller);
+    }
+  }
+
+  async function stopWorkers(): Promise<void> {
+    const controllers = Array.from(workers.values());
+    workers.clear();
+
+    controllers.forEach((controller) => controller.stop());
+    await Promise.allSettled(controllers.map((controller) => controller.promise));
+  }
+
   return {
     async start(): Promise<void> {
       if (running) {
@@ -208,19 +241,15 @@ export function createScenarioRuntime({
       }
 
       running = true;
-      workerControllers = scenario.domains.map((domain) => createQueueWorker(domain.queue));
+      startWorkers();
     },
     async stop(): Promise<void> {
-      if (!running) {
+      if (!running && workers.size === 0) {
         return;
       }
 
       running = false;
-      const controllers = workerControllers;
-      workerControllers = [];
-
-      controllers.forEach((controller) => controller.stop());
-      await Promise.allSettled(controllers.map((controller) => controller.promise));
+      await stopWorkers();
     },
     getStateSnapshot(): Record<string, Record<string, string>> {
       const snapshot: Record<string, Record<string, string>> = {};

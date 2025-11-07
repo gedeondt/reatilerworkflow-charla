@@ -1,4 +1,4 @@
-import { z } from '@reatiler/shared/z.js';
+import { z } from '@reatiler/shared/z';
 
 const domainSchema = z
   .object({
