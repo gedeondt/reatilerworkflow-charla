@@ -4,104 +4,87 @@ import blessed, { type Widgets } from 'blessed';
 import chalk from 'chalk';
 
 import { eventEnvelopeSchema, type EventEnvelope } from '@reatiler/shared';
+import { loadScenario, type Scenario } from '@reatiler/saga-kernel';
 
 const DEFAULT_MESSAGE_QUEUE_URL = 'http://localhost:3005';
 const POLL_INTERVAL_MS = 1000;
 const MAX_LOG_LINES = 50;
 const HIGHLIGHT_DURATION_MS = 400;
-
-const QUEUES = ['orders', 'inventory', 'payments', 'shipping'] as const;
-const DOMAINS = [
-  { key: 'order', label: 'Order' },
-  { key: 'inventory', label: 'Inventory' },
-  { key: 'payments', label: 'Payments' },
-  { key: 'shipping', label: 'Shipping' }
-] as const;
 const VISUALIZER_QUEUE = 'visualizer';
 
-type QueueName = (typeof QUEUES)[number];
-type DomainKey = (typeof DOMAINS)[number]['key'];
-type DomainLabel = (typeof DOMAINS)[number]['label'];
+type DomainState = Record<string, string>;
+type StateUpdate = { domainId: string; status: string };
+type EventFlow = { fromDomainId: string; toDomainId: string };
 
-const domainKeyToLabel = DOMAINS.reduce<Record<DomainKey, DomainLabel>>((acc, { key, label }) => {
-  acc[key] = label;
+const scenarioName = process.env.SCENARIO_NAME ?? 'retailer-happy-path';
+
+let scenario: Scenario;
+
+try {
+  scenario = loadScenario(scenarioName);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`❌ Unable to load scenario "${scenarioName}": ${message}`);
+  process.exit(1);
+}
+
+const DOMAINS = scenario.domains.map((domain) => {
+  const label = domain.id.charAt(0).toUpperCase() + domain.id.slice(1);
+  return { id: domain.id, queue: domain.queue, label };
+});
+
+const queueToDomainId = DOMAINS.reduce<Record<string, string>>((acc, domain) => {
+  acc[domain.queue] = domain.id;
   return acc;
-}, {} as Record<DomainKey, DomainLabel>);
+}, {});
 
-type DomainState = Record<DomainKey, string>;
-type DomainStateUpdate = { domain: DomainKey; state: string };
+const scenarioEventNames = new Set(scenario.events.map((event) => event.name));
 
-const KNOWN_EVENTS = [
-  'OrderPlaced',
-  'OrderConfirmed',
-  'OrderCancelled',
-  'OrderFailed',
-  'InventoryReserved',
-  'InventoryReservationFailed',
-  'InventoryCommitted',
-  'InventoryReleased',
-  'PaymentAuthorized',
-  'PaymentCaptured',
-  'PaymentFailed',
-  'PaymentRefunded',
-  'ShipmentPrepared',
-  'ShipmentDispatched',
-  'ShipmentFailed'
-] as const;
+const EVENT_STATE_UPDATES = scenario.listeners.reduce<Record<string, StateUpdate[]>>(
+  (acc, listener) => {
+    listener.actions.forEach((action) => {
+      if (action.type !== 'set-state') {
+        return;
+      }
 
-type KnownEventName = (typeof KNOWN_EVENTS)[number];
+      const updates = acc[listener.on.event] ?? [];
+      updates.push({ domainId: action.domain, status: action.status });
+      acc[listener.on.event] = updates;
+    });
 
-const EVENT_STATE_CATALOG = {
-  OrderPlaced: [{ domain: 'order', state: 'PLACED' }],
-  OrderConfirmed: [{ domain: 'order', state: 'CONFIRMED' }],
-  OrderCancelled: [{ domain: 'order', state: 'CANCELLED' }],
-  OrderFailed: [{ domain: 'order', state: 'FAILED' }],
-  InventoryReserved: [{ domain: 'inventory', state: 'RESERVED' }],
-  InventoryReservationFailed: [{ domain: 'inventory', state: 'FAILED' }],
-  InventoryCommitted: [{ domain: 'inventory', state: 'COMMITTED' }],
-  InventoryReleased: [{ domain: 'inventory', state: 'RELEASED' }],
-  PaymentAuthorized: [{ domain: 'payments', state: 'AUTHORIZED' }],
-  PaymentCaptured: [
-    { domain: 'payments', state: 'CAPTURED' },
-    { domain: 'order', state: 'CONFIRMED' }
-  ],
-  PaymentFailed: [{ domain: 'payments', state: 'FAILED' }],
-  PaymentRefunded: [{ domain: 'payments', state: 'REFUNDED' }],
-  ShipmentPrepared: [{ domain: 'shipping', state: 'PREPARED' }],
-  ShipmentDispatched: [{ domain: 'shipping', state: 'DISPATCHED' }],
-  ShipmentFailed: [{ domain: 'shipping', state: 'FAILED' }]
-} satisfies Record<KnownEventName, readonly DomainStateUpdate[]>;
+    return acc;
+  },
+  {}
+);
 
-type Flow = { from: DomainKey; to: DomainKey };
+const EVENT_FLOWS_TARGETS = scenario.listeners.reduce<Record<string, string[]>>(
+  (acc, listener) => {
+    listener.actions.forEach((action) => {
+      if (action.type !== 'emit') {
+        return;
+      }
 
-const eventFlows: Partial<Record<KnownEventName, Flow>> = {
-  OrderPlaced: { from: 'order', to: 'inventory' },
-  InventoryReserved: { from: 'inventory', to: 'payments' },
-  InventoryCommitted: { from: 'inventory', to: 'payments' },
-  PaymentAuthorized: { from: 'payments', to: 'shipping' },
-  ShipmentPrepared: { from: 'shipping', to: 'payments' },
-  ShipmentDispatched: { from: 'shipping', to: 'order' },
-  PaymentCaptured: { from: 'payments', to: 'order' },
-  OrderConfirmed: { from: 'order', to: 'order' },
-  OrderCancelled: { from: 'order', to: 'order' },
-  InventoryReservationFailed: { from: 'inventory', to: 'order' },
-  PaymentFailed: { from: 'payments', to: 'order' },
-  ShipmentFailed: { from: 'shipping', to: 'order' },
-  PaymentRefunded: { from: 'payments', to: 'order' },
-  InventoryReleased: { from: 'inventory', to: 'order' }
-} as const;
+      const entries = acc[listener.on.event] ?? [];
+      entries.push(action.toDomain);
+      acc[listener.on.event] = entries;
+    });
 
-const INITIAL_DOMAIN_STATE: DomainState = {
-  order: '-',
-  inventory: '-',
-  payments: '-',
-  shipping: '-'
+    return acc;
+  },
+  {}
+);
+
+const createInitialDomainState = (): DomainState => {
+  return DOMAINS.reduce<Record<string, string>>((acc, domain) => {
+    acc[domain.id] = '-';
+    return acc;
+  }, {});
 };
 
 type EventClassification = 'success' | 'compensation' | 'failure' | 'other';
 
-function isKnownEventName(eventName: string): eventName is KnownEventName {
-  return (KNOWN_EVENTS as readonly string[]).includes(eventName);
+function isScenarioEventName(eventName: string): boolean {
+  return scenarioEventNames.has(eventName);
 }
 
 const messageQueueUrl = process.env.MESSAGE_QUEUE_URL ?? DEFAULT_MESSAGE_QUEUE_URL;
@@ -111,20 +94,18 @@ const configuredFilterCorrelationId = (() => {
 })();
 
 const seenEvents = new Set<string>();
+const unknownQueuesLogged = new Set<string>();
+const unknownEventsLogged = new Set<string>();
 let connectionErrorLogged = false;
 let pushStatusMessage:
   | ((message: string, level: 'info' | 'warning' | 'error') => void)
   | undefined;
 
-type OnEvent = (envelope: EventEnvelope, context: { queue: QueueName }) => void;
-
-function isKnownQueue(queue: string): queue is QueueName {
-  return (QUEUES as readonly string[]).includes(queue);
-}
+type OnEvent = (envelope: EventEnvelope, context: { queue: string }) => void;
 
 function createScreen(): Widgets.Screen {
   const screen = blessed.screen({ smartCSR: true });
-  screen.title = 'Reatiler Workflow — SAGA Visualizer';
+  screen.title = `Reatiler Workflow — ${scenario.name}`;
   return screen;
 }
 
@@ -135,18 +116,20 @@ function createLayout(screen: Widgets.Screen) {
     left: 'center',
     width: 'shrink',
     height: 1,
-    content: chalk.bold('Reatiler Workflow — SAGA Visualizer'),
+    content: chalk.bold(`Reatiler Workflow — ${scenario.name}`),
     tags: true
   });
 
-  const domainBoxes: Record<DomainKey, Widgets.BoxElement> = {} as Record<DomainKey, Widgets.BoxElement>;
+  const domainBoxes: Record<string, Widgets.BoxElement> = {};
+  const widthPercent = 100 / DOMAINS.length;
+  const columnWidth = `${widthPercent}%`;
 
-  DOMAINS.forEach(({ key, label }, index) => {
+  DOMAINS.forEach(({ id, label }, index) => {
     const box = blessed.box({
       parent: screen,
       top: 1,
-      left: `${index * 25}%`,
-      width: '25%',
+      left: `${index * widthPercent}%`,
+      width: columnWidth,
       height: '65%',
       border: { type: 'line' },
       label: ` ${label} `,
@@ -156,7 +139,7 @@ function createLayout(screen: Widgets.Screen) {
       }
     });
 
-    domainBoxes[key] = box;
+    domainBoxes[id] = box;
   });
 
   const eventLogBox = blessed.box({
@@ -180,45 +163,24 @@ function createLayout(screen: Widgets.Screen) {
   return { domainBoxes, eventLogBox };
 }
 
-const SUCCESS_EVENTS: Set<KnownEventName> = new Set([
-  'OrderPlaced',
-  'OrderConfirmed',
-  'InventoryReserved',
-  'InventoryCommitted',
-  'PaymentAuthorized',
-  'PaymentCaptured',
-  'ShipmentPrepared',
-  'ShipmentDispatched'
-]);
-
-const COMPENSATION_EVENTS: Set<KnownEventName> = new Set(['InventoryReleased', 'PaymentRefunded']);
-
-const FAILURE_EVENTS: Set<KnownEventName> = new Set([
-  'OrderCancelled',
-  'InventoryReservationFailed',
-  'PaymentFailed',
-  'ShipmentFailed',
-  'OrderFailed'
-]);
-
 function classifyEvent(eventName: string): EventClassification {
-  if (!isKnownEventName(eventName)) {
+  const updates = EVENT_STATE_UPDATES[eventName];
+
+  if (!updates || updates.length === 0) {
     return 'other';
   }
 
-  if (SUCCESS_EVENTS.has(eventName)) {
-    return 'success';
-  }
+  const statuses = updates.map((update) => update.status.toLowerCase());
 
-  if (COMPENSATION_EVENTS.has(eventName)) {
-    return 'compensation';
-  }
-
-  if (FAILURE_EVENTS.has(eventName)) {
+  if (statuses.some((status) => status.includes('fail') || status.includes('error'))) {
     return 'failure';
   }
 
-  return 'other';
+  if (statuses.some((status) => status.includes('cancel') || status.includes('refund') || status.includes('release'))) {
+    return 'compensation';
+  }
+
+  return 'success';
 }
 
 function classificationToChalk(classification: EventClassification) {
@@ -257,21 +219,24 @@ function formatTimestamp(date: Date): string {
   });
 }
 
-function extractOrderId(data: Record<string, unknown>): string {
-  const direct = data.orderId;
+function extractEntityId(data: Record<string, unknown>): string {
+  const candidateKeys = ['id', 'entityId', 'orderId', 'requestId'];
 
-  if (typeof direct === 'string') {
-    return direct;
+  for (const key of candidateKeys) {
+    const value = data[key];
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
   }
 
-  const order = data.order;
+  for (const value of Object.values(data)) {
+    if (value && typeof value === 'object') {
+      const nestedId = extractEntityId(value as Record<string, unknown>);
 
-  if (order && typeof order === 'object') {
-    const nested = order as Record<string, unknown>;
-    const nestedId = nested.orderId ?? nested.id;
-
-    if (typeof nestedId === 'string') {
-      return nestedId;
+      if (nestedId !== 'n/a') {
+        return nestedId;
+      }
     }
   }
 
@@ -358,14 +323,6 @@ async function pollVisualizerQueue(onEvent: OnEvent): Promise<void> {
     return;
   }
 
-  if (!isKnownQueue(queue)) {
-    pushStatusMessage?.(
-      `⚠️  Received mirrored event for unknown queue "${queue}". Ignoring.`,
-      'warning'
-    );
-    return;
-  }
-
   const parsedEnvelope = eventEnvelopeSchema.safeParse(envelopeCandidate);
 
   if (!parsedEnvelope.success) {
@@ -436,7 +393,7 @@ function start(): void {
   const screen = createScreen();
   const { domainBoxes, eventLogBox } = createLayout(screen);
   const logLines: string[] = [];
-  const highlightTimeouts = new Map<DomainKey, NodeJS.Timeout>();
+  const highlightTimeouts = new Map<string, NodeJS.Timeout>();
   const sagaSnapshots = new Map<string, DomainState>();
   let activeCorrelationId: string | null = configuredFilterCorrelationId;
 
@@ -447,7 +404,7 @@ function start(): void {
       return existing;
     }
 
-    const initialState: DomainState = { ...INITIAL_DOMAIN_STATE };
+    const initialState: DomainState = createInitialDomainState();
     sagaSnapshots.set(correlationId, initialState);
     return initialState;
   };
@@ -455,10 +412,10 @@ function start(): void {
   const refreshDomainColumns = () => {
     const activeState = activeCorrelationId ? sagaSnapshots.get(activeCorrelationId) : undefined;
 
-    DOMAINS.forEach(({ key }) => {
-      const state = activeState?.[key];
+    DOMAINS.forEach(({ id }) => {
+      const state = activeState?.[id];
       const content = state && state !== '-' ? chalk.bold(state) : chalk.gray('-');
-      domainBoxes[key].setContent(content);
+      domainBoxes[id].setContent(content);
     });
   };
 
@@ -491,8 +448,8 @@ function start(): void {
     );
   }
 
-  const highlightDomain = (domain: DomainKey, classification: EventClassification) => {
-    const box = domainBoxes[domain];
+  const highlightDomain = (domainId: string, classification: EventClassification) => {
+    const box = domainBoxes[domainId];
 
     if (!box) {
       return;
@@ -503,7 +460,7 @@ function start(): void {
     updateBoxColor(box, color);
     screen.render();
 
-    const existingTimeout = highlightTimeouts.get(domain);
+    const existingTimeout = highlightTimeouts.get(domainId);
 
     if (existingTimeout) {
       clearTimeout(existingTimeout);
@@ -512,10 +469,10 @@ function start(): void {
     const timeout = setTimeout(() => {
       updateBoxColor(box, 'white');
       screen.render();
-      highlightTimeouts.delete(domain);
+      highlightTimeouts.delete(domainId);
     }, HIGHLIGHT_DURATION_MS);
 
-    highlightTimeouts.set(domain, timeout);
+    highlightTimeouts.set(domainId, timeout);
   };
 
   const stopPolling = startPolling((envelope, { queue }) => {
@@ -523,10 +480,12 @@ function start(): void {
     const queueLabel = chalk.cyan(`[${queue}]`);
     const classification = classifyEvent(envelope.eventName);
     const colorizeEvent = classificationToChalk(classification);
-    const flow = isKnownEventName(envelope.eventName)
-      ? eventFlows[envelope.eventName]
-      : undefined;
-    const orderId = extractOrderId(envelope.data);
+    const queueDomainId = queueToDomainId[queue];
+    const flowTargets = EVENT_FLOWS_TARGETS[envelope.eventName] ?? [];
+    const flows: EventFlow[] = queueDomainId
+      ? flowTargets.map((toDomainId) => ({ fromDomainId: queueDomainId, toDomainId }))
+      : [];
+    const entityId = extractEntityId(envelope.data);
     const correlationId = envelope.correlationId?.trim();
 
     if (!correlationId) {
@@ -539,34 +498,30 @@ function start(): void {
 
     const sagaSnapshot = getOrCreateSagaSnapshot(correlationId);
 
-    if (isKnownEventName(envelope.eventName)) {
-      const stateUpdates = EVENT_STATE_CATALOG[envelope.eventName];
-      stateUpdates.forEach(({ domain, state }) => {
-        sagaSnapshot[domain] = state;
+    const stateUpdates = EVENT_STATE_UPDATES[envelope.eventName];
+
+    if (stateUpdates) {
+      stateUpdates.forEach(({ domainId, status }) => {
+        sagaSnapshot[domainId] = status;
       });
-    } else {
-      pushStatusMessage?.(
-        `⚠️  Received event with unknown name "${envelope.eventName}". Ignoring state update.`,
-        'warning'
-      );
     }
 
-    if (!configuredFilterCorrelationId && envelope.eventName === 'OrderPlaced') {
+    if (!configuredFilterCorrelationId && activeCorrelationId === null) {
       activeCorrelationId = correlationId;
     }
 
     const isActiveCorrelation = activeCorrelationId === correlationId;
 
     const details: string[] = [
-      `Order=${orderId}`,
+      `Entity=${entityId}`,
       `Trace=${envelope.traceId}`,
       `Correlation=${correlationId}${isActiveCorrelation ? '' : ' (inactive)'}`
     ];
 
-    if (flow) {
-      const fromLabel = domainKeyToLabel[flow.from];
-      const toLabel = domainKeyToLabel[flow.to];
-      details.push(`from=${fromLabel} → to=${toLabel}`);
+    if (flows.length > 0) {
+      flows.forEach(({ fromDomainId, toDomainId }) => {
+        details.push(`from=${fromDomainId} → to=${toDomainId}`);
+      });
     }
 
     const logLine = `${timestamp} ${queueLabel} ${colorizeEvent(
@@ -580,12 +535,30 @@ function start(): void {
       screen.render();
     }
 
-    if (isActiveCorrelation && flow) {
-      highlightDomain(flow.from, classification);
+    if (isActiveCorrelation && flows.length > 0) {
+      flows.forEach(({ fromDomainId, toDomainId }) => {
+        highlightDomain(fromDomainId, classification);
 
-      if (flow.to !== flow.from) {
-        highlightDomain(flow.to, classification);
-      }
+        if (toDomainId !== fromDomainId) {
+          highlightDomain(toDomainId, classification);
+        }
+      });
+    }
+  
+    if (!queueDomainId && !unknownQueuesLogged.has(queue)) {
+      unknownQueuesLogged.add(queue);
+      pushStatusMessage?.(
+        `⚠️  Unknown queue "${queue}" for current scenario.`,
+        'warning'
+      );
+    }
+
+    if (!isScenarioEventName(envelope.eventName) && !unknownEventsLogged.has(envelope.eventName)) {
+      unknownEventsLogged.add(envelope.eventName);
+      pushStatusMessage?.(
+        `⚠️  Unknown event "${envelope.eventName}" for scenario "${scenarioName}".`,
+        'warning'
+      );
     }
   });
 
