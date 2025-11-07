@@ -31,9 +31,50 @@ const domainKeyToLabel = DOMAINS.reduce<Record<DomainKey, DomainLabel>>((acc, { 
 type DomainState = Record<DomainKey, string>;
 type DomainStateUpdate = { domain: DomainKey; state: string };
 
+const KNOWN_EVENTS = [
+  'OrderPlaced',
+  'OrderConfirmed',
+  'OrderCancelled',
+  'OrderFailed',
+  'InventoryReserved',
+  'InventoryReservationFailed',
+  'InventoryCommitted',
+  'InventoryReleased',
+  'PaymentAuthorized',
+  'PaymentCaptured',
+  'PaymentFailed',
+  'PaymentRefunded',
+  'ShipmentPrepared',
+  'ShipmentDispatched',
+  'ShipmentFailed'
+] as const;
+
+type KnownEventName = (typeof KNOWN_EVENTS)[number];
+
+const EVENT_STATE_CATALOG = {
+  OrderPlaced: [{ domain: 'order', state: 'PLACED' }],
+  OrderConfirmed: [{ domain: 'order', state: 'CONFIRMED' }],
+  OrderCancelled: [{ domain: 'order', state: 'CANCELLED' }],
+  OrderFailed: [{ domain: 'order', state: 'FAILED' }],
+  InventoryReserved: [{ domain: 'inventory', state: 'RESERVED' }],
+  InventoryReservationFailed: [{ domain: 'inventory', state: 'FAILED' }],
+  InventoryCommitted: [{ domain: 'inventory', state: 'COMMITTED' }],
+  InventoryReleased: [{ domain: 'inventory', state: 'RELEASED' }],
+  PaymentAuthorized: [{ domain: 'payments', state: 'AUTHORIZED' }],
+  PaymentCaptured: [
+    { domain: 'payments', state: 'CAPTURED' },
+    { domain: 'order', state: 'CONFIRMED' }
+  ],
+  PaymentFailed: [{ domain: 'payments', state: 'FAILED' }],
+  PaymentRefunded: [{ domain: 'payments', state: 'REFUNDED' }],
+  ShipmentPrepared: [{ domain: 'shipping', state: 'PREPARED' }],
+  ShipmentDispatched: [{ domain: 'shipping', state: 'DISPATCHED' }],
+  ShipmentFailed: [{ domain: 'shipping', state: 'FAILED' }]
+} satisfies Record<KnownEventName, readonly DomainStateUpdate[]>;
+
 type Flow = { from: DomainKey; to: DomainKey };
 
-const eventFlows: Record<string, Flow> = {
+const eventFlows: Partial<Record<KnownEventName, Flow>> = {
   OrderPlaced: { from: 'order', to: 'inventory' },
   InventoryReserved: { from: 'inventory', to: 'payments' },
   InventoryCommitted: { from: 'inventory', to: 'payments' },
@@ -51,36 +92,23 @@ const eventFlows: Record<string, Flow> = {
 } as const;
 
 const INITIAL_DOMAIN_STATE: DomainState = {
-  order: '',
-  inventory: '',
-  payments: '',
-  shipping: ''
-};
-
-const EVENT_STATE_UPDATES: Partial<Record<string, DomainStateUpdate[]>> = {
-  OrderPlaced: [{ domain: 'order', state: 'PLACED' }],
-  OrderConfirmed: [{ domain: 'order', state: 'CONFIRMED' }],
-  OrderCancelled: [{ domain: 'order', state: 'CANCELLED' }],
-  OrderFailed: [{ domain: 'order', state: 'FAILED' }],
-  InventoryReserved: [{ domain: 'inventory', state: 'RESERVED' }],
-  InventoryCommitted: [{ domain: 'inventory', state: 'COMMITTED' }],
-  InventoryReleased: [{ domain: 'inventory', state: 'RELEASED' }],
-  InventoryReservationFailed: [{ domain: 'inventory', state: 'FAILED' }],
-  PaymentAuthorized: [{ domain: 'payments', state: 'AUTHORIZED' }],
-  PaymentCaptured: [
-    { domain: 'payments', state: 'CAPTURED' },
-    { domain: 'order', state: 'CONFIRMED' }
-  ],
-  PaymentRefunded: [{ domain: 'payments', state: 'REFUNDED' }],
-  PaymentFailed: [{ domain: 'payments', state: 'FAILED' }],
-  ShipmentPrepared: [{ domain: 'shipping', state: 'PREPARED' }],
-  ShipmentDispatched: [{ domain: 'shipping', state: 'DISPATCHED' }],
-  ShipmentFailed: [{ domain: 'shipping', state: 'FAILED' }]
+  order: '-',
+  inventory: '-',
+  payments: '-',
+  shipping: '-'
 };
 
 type EventClassification = 'success' | 'compensation' | 'failure' | 'other';
 
+function isKnownEventName(eventName: string): eventName is KnownEventName {
+  return (KNOWN_EVENTS as readonly string[]).includes(eventName);
+}
+
 const messageQueueUrl = process.env.MESSAGE_QUEUE_URL ?? DEFAULT_MESSAGE_QUEUE_URL;
+const configuredFilterCorrelationId = (() => {
+  const raw = process.env.VIS_FILTER_ORDER_ID?.trim();
+  return raw && raw.length > 0 ? raw : null;
+})();
 
 const seenEvents = new Set<string>();
 let connectionErrorLogged = false;
@@ -152,37 +180,41 @@ function createLayout(screen: Widgets.Screen) {
   return { domainBoxes, eventLogBox };
 }
 
+const SUCCESS_EVENTS: Set<KnownEventName> = new Set([
+  'OrderPlaced',
+  'OrderConfirmed',
+  'InventoryReserved',
+  'InventoryCommitted',
+  'PaymentAuthorized',
+  'PaymentCaptured',
+  'ShipmentPrepared',
+  'ShipmentDispatched'
+]);
+
+const COMPENSATION_EVENTS: Set<KnownEventName> = new Set(['InventoryReleased', 'PaymentRefunded']);
+
+const FAILURE_EVENTS: Set<KnownEventName> = new Set([
+  'OrderCancelled',
+  'InventoryReservationFailed',
+  'PaymentFailed',
+  'ShipmentFailed',
+  'OrderFailed'
+]);
+
 function classifyEvent(eventName: string): EventClassification {
-  const successEvents = new Set([
-    'OrderPlaced',
-    'OrderConfirmed',
-    'InventoryReserved',
-    'InventoryCommitted',
-    'PaymentAuthorized',
-    'PaymentCaptured',
-    'ShipmentPrepared',
-    'ShipmentDispatched'
-  ]);
+  if (!isKnownEventName(eventName)) {
+    return 'other';
+  }
 
-  const compensationEvents = new Set(['InventoryReleased', 'PaymentRefunded']);
-
-  const failureEvents = new Set([
-    'OrderCancelled',
-    'InventoryReservationFailed',
-    'PaymentFailed',
-    'ShipmentFailed',
-    'OrderFailed'
-  ]);
-
-  if (successEvents.has(eventName)) {
+  if (SUCCESS_EVENTS.has(eventName)) {
     return 'success';
   }
 
-  if (compensationEvents.has(eventName)) {
+  if (COMPENSATION_EVENTS.has(eventName)) {
     return 'compensation';
   }
 
-  if (failureEvents.has(eventName)) {
+  if (FAILURE_EVENTS.has(eventName)) {
     return 'failure';
   }
 
@@ -405,27 +437,27 @@ function start(): void {
   const { domainBoxes, eventLogBox } = createLayout(screen);
   const logLines: string[] = [];
   const highlightTimeouts = new Map<DomainKey, NodeJS.Timeout>();
-  const sagaStates = new Map<string, DomainState>();
-  let activeCorrelationId: string | null = null;
+  const sagaSnapshots = new Map<string, DomainState>();
+  let activeCorrelationId: string | null = configuredFilterCorrelationId;
 
-  const getOrCreateSagaState = (correlationId: string): DomainState => {
-    const existing = sagaStates.get(correlationId);
+  const getOrCreateSagaSnapshot = (correlationId: string): DomainState => {
+    const existing = sagaSnapshots.get(correlationId);
 
     if (existing) {
       return existing;
     }
 
     const initialState: DomainState = { ...INITIAL_DOMAIN_STATE };
-    sagaStates.set(correlationId, initialState);
+    sagaSnapshots.set(correlationId, initialState);
     return initialState;
   };
 
   const refreshDomainColumns = () => {
-    const activeState = activeCorrelationId ? sagaStates.get(activeCorrelationId) : undefined;
+    const activeState = activeCorrelationId ? sagaSnapshots.get(activeCorrelationId) : undefined;
 
     DOMAINS.forEach(({ key }) => {
       const state = activeState?.[key];
-      const content = state ? chalk.bold(state) : chalk.gray('-');
+      const content = state && state !== '-' ? chalk.bold(state) : chalk.gray('-');
       domainBoxes[key].setContent(content);
     });
   };
@@ -451,6 +483,13 @@ function start(): void {
           : chalk.cyan(message);
     appendLogLine(`${chalk.gray(`[${formatTimestamp(new Date())}]`)} ${colorized}`);
   };
+
+  if (configuredFilterCorrelationId) {
+    pushStatusMessage?.(
+      `🎯 Filter active. Showing correlationId=${configuredFilterCorrelationId}.`,
+      'info'
+    );
+  }
 
   const highlightDomain = (domain: DomainKey, classification: EventClassification) => {
     const box = domainBoxes[domain];
@@ -484,26 +523,45 @@ function start(): void {
     const queueLabel = chalk.cyan(`[${queue}]`);
     const classification = classifyEvent(envelope.eventName);
     const colorizeEvent = classificationToChalk(classification);
-    const flow = eventFlows[envelope.eventName];
+    const flow = isKnownEventName(envelope.eventName)
+      ? eventFlows[envelope.eventName]
+      : undefined;
     const orderId = extractOrderId(envelope.data);
-    const correlationId = envelope.correlationId;
-    const sagaState = getOrCreateSagaState(correlationId);
+    const correlationId = envelope.correlationId?.trim();
 
-    if (!activeCorrelationId) {
+    if (!correlationId) {
+      pushStatusMessage?.(
+        `⚠️  Received event without correlationId: ${envelope.eventName}`,
+        'warning'
+      );
+      return;
+    }
+
+    const sagaSnapshot = getOrCreateSagaSnapshot(correlationId);
+
+    if (isKnownEventName(envelope.eventName)) {
+      const stateUpdates = EVENT_STATE_CATALOG[envelope.eventName];
+      stateUpdates.forEach(({ domain, state }) => {
+        sagaSnapshot[domain] = state;
+      });
+    } else {
+      pushStatusMessage?.(
+        `⚠️  Received event with unknown name "${envelope.eventName}". Ignoring state update.`,
+        'warning'
+      );
+    }
+
+    if (!configuredFilterCorrelationId && envelope.eventName === 'OrderPlaced') {
       activeCorrelationId = correlationId;
     }
 
     const isActiveCorrelation = activeCorrelationId === correlationId;
 
-    const stateUpdates = EVENT_STATE_UPDATES[envelope.eventName];
-
-    if (stateUpdates) {
-      stateUpdates.forEach(({ domain, state }) => {
-        sagaState[domain] = state;
-      });
-    }
-
-    const details: string[] = [`Order=${orderId}`, `Trace=${envelope.traceId}`];
+    const details: string[] = [
+      `Order=${orderId}`,
+      `Trace=${envelope.traceId}`,
+      `Correlation=${correlationId}${isActiveCorrelation ? '' : ' (inactive)'}`
+    ];
 
     if (flow) {
       const fromLabel = domainKeyToLabel[flow.from];
@@ -522,7 +580,7 @@ function start(): void {
       screen.render();
     }
 
-    if (flow) {
+    if (isActiveCorrelation && flow) {
       highlightDomain(flow.from, classification);
 
       if (flow.to !== flow.from) {
