@@ -18,9 +18,9 @@
   "listeners": [
     {
       "id": "order-on-OrderPlaced",
+      "delayMs": 20,
       "on": {
-        "event": "OrderPlaced",
-        "delayMs": 20
+        "event": "OrderPlaced"
       },
       "actions": [
         {
@@ -37,9 +37,9 @@
     },
     {
       "id": "inventory-on-InventoryReserved",
+      "delayMs": 30,
       "on": {
-        "event": "InventoryReserved",
-        "delayMs": 30
+        "event": "InventoryReserved"
       },
       "actions": [
         {
@@ -56,9 +56,9 @@
     },
     {
       "id": "payments-on-PaymentAuthorized",
+      "delayMs": 40,
       "on": {
-        "event": "PaymentAuthorized",
-        "delayMs": 40
+        "event": "PaymentAuthorized"
       },
       "actions": [
         {
@@ -75,9 +75,9 @@
     },
     {
       "id": "shipping-on-ShipmentPrepared",
+      "delayMs": 50,
       "on": {
-        "event": "ShipmentPrepared",
-        "delayMs": 50
+        "event": "ShipmentPrepared"
       },
       "actions": [
         {
@@ -94,16 +94,11 @@
     },
     {
       "id": "order-on-PaymentCaptured",
+      "delayMs": 25,
       "on": {
-        "event": "PaymentCaptured",
-        "delayMs": 25
+        "event": "PaymentCaptured"
       },
       "actions": [
-        {
-          "type": "set-state",
-          "domain": "payments",
-          "status": "CAPTURED"
-        },
         {
           "type": "set-state",
           "domain": "order",

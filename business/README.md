@@ -14,7 +14,8 @@ Cada archivo describe un escenario con la siguiente estructura de primer nivel:
 - `events` (`array`): catálogo de eventos de negocio relevantes para el escenario. Cada elemento define el campo `name` del evento.
 - `listeners` (`array`): definición de las reacciones a los eventos. Cada listener describe:
   - `id`: identificador único del listener.
-  - `on`: bloque con el `event` que lo dispara y un `delayMs` para simular asincronía.
+  - `delayMs`: tiempo de espera simulado antes de procesar el evento.
+  - `on`: bloque con el `event` que lo dispara.
   - `actions`: lista de acciones ejecutadas cuando se procesa el evento. Las acciones disponibles son:
     - `emit`: publica un nuevo evento (`event`) dirigido a un `toDomain` concreto.
     - `set-state`: actualiza el estado conceptual de un `domain` con un `status` descriptivo.
@@ -22,4 +23,5 @@ Cada archivo describe un escenario con la siguiente estructura de primer nivel:
 ## Notas
 
 - El campo `delayMs` permite modelar tiempos de procesamiento sin acoplarse a una implementación concreta.
+- De momento, el escenario asume que el evento `OrderPlaced` se emite desde un flujo externo (por ejemplo, `POST /orders`). El runtime conectará este origen en una iteración posterior.
 - En este paso no existe un runtime que consuma estos ficheros; en iteraciones posteriores se construirá un kernel genérico que interprete este formato.
