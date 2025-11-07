@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@reatiler/shared": "workspace:*",
+    "blessed": "^0.1.81",
     "chalk": "^5.3.0"
   },
   "devDependencies": {
+    "@types/blessed": "^0.1.25",
     "tsx": "^4.7.1",
     "typescript": "^5.4.5"
   }
