@@ -8,14 +8,12 @@ Este monorepo establece la semántica base para un ecosistema de microservicios 
 .
 ├── adr/               # Architecture Decision Records
 ├── docs/              # Escenarios, agentes y políticas globales
+├── business/          # Escenarios declarativos por dominio
 ├── packages/
 │   └── shared/        # Código compartido entre servicios
 ├── services/
-│   ├── inventory/
 │   ├── message-queue/
-│   ├── order/
-│   ├── payments/
-│   └── shipping/
+│   └── scenario-runner/
 ├── package.json
 ├── pnpm-workspace.yaml
 ├── turbo.json
@@ -34,16 +32,19 @@ La configuración mediante un archivo `.env` es opcional. Por defecto, los servi
 
 ## Arranque local
 
-El entorno local levanta cinco procesos (cola de mensajes más cuatro dominios) mediante Turborepo.
+Ahora la lógica de los dominios se describe declarativamente en los ficheros JSON bajo [`/business/`](./business). El flujo completo se ejecuta con `message-queue` + `scenario-runner`, mientras que el visualizador se adapta automáticamente al escenario activo.
 
 ```bash
 pnpm i
 pnpm dev
-curl :3001/health
-curl :3005/health
 ```
 
-Cada servicio expone `/health` devolviendo `{"status":"ok","service":"<nombre>"}` y escucha en los puertos 3001 al 3005.
+El comando anterior orquesta ambos servicios mediante Turborepo. También puedes ejecutarlos por separado en terminales distintas:
+
+```bash
+pnpm -F message-queue dev
+pnpm -F scenario-runner dev
+```
 
 ### Logging
 
@@ -55,11 +56,7 @@ LOG_LEVEL=info pnpm dev
 
 ## Puesta en marcha
 
-Cada servicio contará con scripts de desarrollo orquestados mediante Turborepo. Por ahora, los comandos son placeholders hasta que se implemente la lógica de cada dominio.
-
-```bash
-pnpm dev
-```
+El runner interpreta los escenarios declarativos y publica eventos en la cola HTTP. No es necesario implementar lógica específica por dominio: basta con editar los JSON bajo `business/` y volver a arrancar los servicios para reflejar nuevos comportamientos.
 
 ## Filosofía Spec-as-Source
 
@@ -100,52 +97,44 @@ sequenceDiagram
 
 ### Unitarias
 
-Ejecutan los tests rápidos (incluyendo contratos compartidos y workers) sin habilitar los E2E.
+Los tests rápidos siguen respaldando los contratos compartidos y la infraestructura.
 
 ```bash
 pnpm test:unit
-pnpm -F order test:unit
-pnpm -F inventory test:unit
-pnpm -F payments test:unit
-pnpm -F shipping test:unit
 pnpm -F message-queue test:unit
+pnpm -F scenario-runner test
 pnpm -F @reatiler/shared test:unit
+pnpm -F @reatiler/saga-kernel test
 ```
 
-### End-to-end (happy path + smokes de compensación)
+### End-to-end y flujos orquestados
 
-Los recorridos de la SAGA se ejecutan en memoria usando `FakeEventBus`. Incluyen el happy path y los tres smokes de fallo.
+Los recorridos de la SAGA ahora se describen en `business/*.json` y se ejecutan mediante el runner.
 
 ```bash
-pnpm test:e2e           # orquesta todos los E2E disponibles
-pnpm -F order test:e2e  # ejecuta únicamente los recorridos end-to-end
+pnpm test:e2e
 ```
 
-### Smokes manuales
-
-Los mismos escenarios de compensación pueden explorarse a mano levantando los servicios y jugando con los toggles.
+Para inspeccionar los eventos publicados en la cola sin consumirlos, ejecuta el visualizador. Detectará las colas relevantes según el escenario cargado.
 
 ```bash
-pnpm dev
+pnpm -F visualizer-cli dev
+```
 
-# A) Fallo en reserva de inventario
-ALLOW_RESERVATION=false pnpm -F inventory dev &
-curl -s -X POST http://localhost:3001/orders \
-  -H 'content-type: application/json' \
-  -d '{"requestId":"r2","lines":[{"sku":"SKU1","qty":1}],"amount":100,"address":{"line1":"Calle 1","city":"Madrid","zip":"28001","country":"ES"}}' | jq
-# GET /orders/{id} -> status: FAILED
+### Exploración manual
 
-# B) Fallo en autorización de pago → stock liberado, pedido cancelado
-ALLOW_AUTH=false pnpm -F payments dev &
-# POST /orders ... -> luego GET /orders/{id} -> status: CANCELLED
+Modifica el escenario activo dentro de `business/` (por ejemplo, cambiando tiempos o respuestas) y reinicia `scenario-runner` para observar el nuevo comportamiento. No es necesario habilitar toggles por servicio: la cola y el runner absorben los cambios declarativos.
 
-# C) Fallo tardío en shipping → refund y cancelación
-ALLOW_PREPARE=false pnpm -F shipping dev &
-# POST /orders ... -> luego GET /orders/{id} -> status: CANCELLED
-
-# Para validar la cola manualmente
+```bash
+# en una terminal
 pnpm -F message-queue dev
-curl http://localhost:3005/health
-curl -X POST http://localhost:3005/queues/test/messages -H 'content-type: application/json' -d '{"eventName":"Ping","version":1,"eventId":"e1","traceId":"t1","correlationId":"c1","occurredAt":"2025-01-01T00:00:00Z","data":{}}'
-curl -X POST http://localhost:3005/queues/test/pop
+
+# en otra
+pnpm -F scenario-runner dev
 ```
+
+El visualizador CLI se ajustará automáticamente a las colas publicadas por el escenario.
+
+## Migración
+
+Los servicios de dominio anteriores (orders, inventory, etc.) se han eliminado; su comportamiento se encuentra descrito en los escenarios de negocio.
