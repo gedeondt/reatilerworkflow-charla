@@ -214,6 +214,34 @@ importers:
         specifier: ^1.4.0
         version: 1.6.1(@types/node@20.19.24)
 
+  services/scenario-runner:
+    dependencies:
+      '@reatiler/saga-kernel':
+        specifier: workspace:*
+        version: link:../../packages/saga-kernel
+      '@reatiler/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      fastify:
+        specifier: ^4.29.1
+        version: 4.29.1
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.12.7
+        version: 20.19.24
+      tsx:
+        specifier: ^4.7.1
+        version: 4.20.6
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+      vitest:
+        specifier: ^1.4.0
+        version: 1.6.1(@types/node@20.19.24)
+
   services/shipping:
     dependencies:
       '@reatiler/shared':

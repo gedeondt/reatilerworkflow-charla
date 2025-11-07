@@ -41,6 +41,7 @@ export function createScenarioRuntime({
   scenario.domains.forEach((domain) => {
     domainQueues.set(domain.id, domain.queue);
   });
+
   const listenersByEvent = new Map<string, Listener[]>();
 
   for (const listener of scenario.listeners) {
@@ -60,10 +61,7 @@ export function createScenarioRuntime({
     state.set(correlationId, domainState);
   }
 
-  async function executeAction(
-    action: ListenerAction,
-    envelope: EventEnvelope
-  ): Promise<void> {
+  async function executeAction(action: ListenerAction, envelope: EventEnvelope): Promise<void> {
     if (action.type === 'set-state') {
       updateState(envelope.correlationId, action.domain, action.status);
       logger.debug({
