@@ -25,10 +25,13 @@ type Flow = { from: Domain; to: Domain };
 const eventFlows: Record<string, Flow> = {
   OrderPlaced: { from: 'Order', to: 'Inventory' },
   InventoryReserved: { from: 'Inventory', to: 'Payments' },
+  InventoryCommitted: { from: 'Inventory', to: 'Payments' },
   PaymentAuthorized: { from: 'Payments', to: 'Shipping' },
   ShipmentPrepared: { from: 'Shipping', to: 'Payments' },
+  ShipmentDispatched: { from: 'Shipping', to: 'Order' },
   PaymentCaptured: { from: 'Payments', to: 'Order' },
   OrderConfirmed: { from: 'Order', to: 'Order' },
+  OrderCancelled: { from: 'Order', to: 'Order' },
   InventoryReservationFailed: { from: 'Inventory', to: 'Order' },
   PaymentFailed: { from: 'Payments', to: 'Order' },
   ShipmentFailed: { from: 'Shipping', to: 'Order' },
@@ -43,20 +46,25 @@ const INITIAL_DOMAIN_STATE: DomainState = {
   Shipping: ''
 };
 
-const EVENT_STATE_UPDATES: Partial<Record<string, DomainStateUpdate>> = {
-  OrderPlaced: { domain: 'Order', state: 'PLACED' },
-  OrderConfirmed: { domain: 'Order', state: 'CONFIRMED' },
-  OrderFailed: { domain: 'Order', state: 'FAILED' },
-  InventoryReserved: { domain: 'Inventory', state: 'RESERVED' },
-  InventoryReleased: { domain: 'Inventory', state: 'RELEASED' },
-  InventoryReservationFailed: { domain: 'Inventory', state: 'FAILED' },
-  PaymentAuthorized: { domain: 'Payments', state: 'AUTHORIZED' },
-  PaymentCaptured: { domain: 'Payments', state: 'CAPTURED' },
-  PaymentRefunded: { domain: 'Payments', state: 'REFUNDED' },
-  PaymentFailed: { domain: 'Payments', state: 'FAILED' },
-  ShipmentPrepared: { domain: 'Shipping', state: 'PREPARED' },
-  ShipmentDispatched: { domain: 'Shipping', state: 'DISPATCHED' },
-  ShipmentFailed: { domain: 'Shipping', state: 'FAILED' }
+const EVENT_STATE_UPDATES: Partial<Record<string, DomainStateUpdate[]>> = {
+  OrderPlaced: [{ domain: 'Order', state: 'PLACED' }],
+  OrderConfirmed: [{ domain: 'Order', state: 'CONFIRMED' }],
+  OrderCancelled: [{ domain: 'Order', state: 'CANCELLED' }],
+  OrderFailed: [{ domain: 'Order', state: 'FAILED' }],
+  InventoryReserved: [{ domain: 'Inventory', state: 'RESERVED' }],
+  InventoryCommitted: [{ domain: 'Inventory', state: 'COMMITTED' }],
+  InventoryReleased: [{ domain: 'Inventory', state: 'RELEASED' }],
+  InventoryReservationFailed: [{ domain: 'Inventory', state: 'FAILED' }],
+  PaymentAuthorized: [{ domain: 'Payments', state: 'AUTHORIZED' }],
+  PaymentCaptured: [
+    { domain: 'Payments', state: 'CAPTURED' },
+    { domain: 'Order', state: 'CONFIRMED' }
+  ],
+  PaymentRefunded: [{ domain: 'Payments', state: 'REFUNDED' }],
+  PaymentFailed: [{ domain: 'Payments', state: 'FAILED' }],
+  ShipmentPrepared: [{ domain: 'Shipping', state: 'PREPARED' }],
+  ShipmentDispatched: [{ domain: 'Shipping', state: 'DISPATCHED' }],
+  ShipmentFailed: [{ domain: 'Shipping', state: 'FAILED' }]
 };
 
 type EventClassification = 'success' | 'compensation' | 'failure' | 'other';
@@ -136,16 +144,19 @@ function createLayout(screen: Widgets.Screen) {
 function classifyEvent(eventName: string): EventClassification {
   const successEvents = new Set([
     'OrderPlaced',
+    'OrderConfirmed',
     'InventoryReserved',
+    'InventoryCommitted',
     'PaymentAuthorized',
-    'ShipmentPrepared',
     'PaymentCaptured',
-    'OrderConfirmed'
+    'ShipmentPrepared',
+    'ShipmentDispatched'
   ]);
 
   const compensationEvents = new Set(['InventoryReleased', 'PaymentRefunded']);
 
   const failureEvents = new Set([
+    'OrderCancelled',
     'InventoryReservationFailed',
     'PaymentFailed',
     'ShipmentFailed',
@@ -471,10 +482,12 @@ function start(): void {
       activeCorrelationId = correlationId;
     }
 
-    const stateUpdate = EVENT_STATE_UPDATES[envelope.eventName];
+    const stateUpdates = EVENT_STATE_UPDATES[envelope.eventName];
 
-    if (stateUpdate) {
-      sagaState[stateUpdate.domain] = stateUpdate.state;
+    if (stateUpdates) {
+      stateUpdates.forEach(({ domain, state }) => {
+        sagaState[domain] = state;
+      });
     }
 
     const details: string[] = [`Order=${orderId}`, `Trace=${envelope.traceId}`];
