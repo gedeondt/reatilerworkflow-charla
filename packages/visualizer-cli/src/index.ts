@@ -11,60 +11,71 @@ const MAX_LOG_LINES = 50;
 const HIGHLIGHT_DURATION_MS = 400;
 
 const QUEUES = ['orders', 'inventory', 'payments', 'shipping'] as const;
-const DOMAINS = ['Order', 'Inventory', 'Payments', 'Shipping'] as const;
+const DOMAINS = [
+  { key: 'order', label: 'Order' },
+  { key: 'inventory', label: 'Inventory' },
+  { key: 'payments', label: 'Payments' },
+  { key: 'shipping', label: 'Shipping' }
+] as const;
 const VISUALIZER_QUEUE = 'visualizer';
 
 type QueueName = (typeof QUEUES)[number];
-type Domain = (typeof DOMAINS)[number];
+type DomainKey = (typeof DOMAINS)[number]['key'];
+type DomainLabel = (typeof DOMAINS)[number]['label'];
 
-type DomainState = Record<Domain, string>;
-type DomainStateUpdate = { domain: Domain; state: string };
+const domainKeyToLabel = DOMAINS.reduce<Record<DomainKey, DomainLabel>>((acc, { key, label }) => {
+  acc[key] = label;
+  return acc;
+}, {} as Record<DomainKey, DomainLabel>);
 
-type Flow = { from: Domain; to: Domain };
+type DomainState = Record<DomainKey, string>;
+type DomainStateUpdate = { domain: DomainKey; state: string };
+
+type Flow = { from: DomainKey; to: DomainKey };
 
 const eventFlows: Record<string, Flow> = {
-  OrderPlaced: { from: 'Order', to: 'Inventory' },
-  InventoryReserved: { from: 'Inventory', to: 'Payments' },
-  InventoryCommitted: { from: 'Inventory', to: 'Payments' },
-  PaymentAuthorized: { from: 'Payments', to: 'Shipping' },
-  ShipmentPrepared: { from: 'Shipping', to: 'Payments' },
-  ShipmentDispatched: { from: 'Shipping', to: 'Order' },
-  PaymentCaptured: { from: 'Payments', to: 'Order' },
-  OrderConfirmed: { from: 'Order', to: 'Order' },
-  OrderCancelled: { from: 'Order', to: 'Order' },
-  InventoryReservationFailed: { from: 'Inventory', to: 'Order' },
-  PaymentFailed: { from: 'Payments', to: 'Order' },
-  ShipmentFailed: { from: 'Shipping', to: 'Order' },
-  PaymentRefunded: { from: 'Payments', to: 'Order' },
-  InventoryReleased: { from: 'Inventory', to: 'Order' }
+  OrderPlaced: { from: 'order', to: 'inventory' },
+  InventoryReserved: { from: 'inventory', to: 'payments' },
+  InventoryCommitted: { from: 'inventory', to: 'payments' },
+  PaymentAuthorized: { from: 'payments', to: 'shipping' },
+  ShipmentPrepared: { from: 'shipping', to: 'payments' },
+  ShipmentDispatched: { from: 'shipping', to: 'order' },
+  PaymentCaptured: { from: 'payments', to: 'order' },
+  OrderConfirmed: { from: 'order', to: 'order' },
+  OrderCancelled: { from: 'order', to: 'order' },
+  InventoryReservationFailed: { from: 'inventory', to: 'order' },
+  PaymentFailed: { from: 'payments', to: 'order' },
+  ShipmentFailed: { from: 'shipping', to: 'order' },
+  PaymentRefunded: { from: 'payments', to: 'order' },
+  InventoryReleased: { from: 'inventory', to: 'order' }
 } as const;
 
 const INITIAL_DOMAIN_STATE: DomainState = {
-  Order: '',
-  Inventory: '',
-  Payments: '',
-  Shipping: ''
+  order: '',
+  inventory: '',
+  payments: '',
+  shipping: ''
 };
 
 const EVENT_STATE_UPDATES: Partial<Record<string, DomainStateUpdate[]>> = {
-  OrderPlaced: [{ domain: 'Order', state: 'PLACED' }],
-  OrderConfirmed: [{ domain: 'Order', state: 'CONFIRMED' }],
-  OrderCancelled: [{ domain: 'Order', state: 'CANCELLED' }],
-  OrderFailed: [{ domain: 'Order', state: 'FAILED' }],
-  InventoryReserved: [{ domain: 'Inventory', state: 'RESERVED' }],
-  InventoryCommitted: [{ domain: 'Inventory', state: 'COMMITTED' }],
-  InventoryReleased: [{ domain: 'Inventory', state: 'RELEASED' }],
-  InventoryReservationFailed: [{ domain: 'Inventory', state: 'FAILED' }],
-  PaymentAuthorized: [{ domain: 'Payments', state: 'AUTHORIZED' }],
+  OrderPlaced: [{ domain: 'order', state: 'PLACED' }],
+  OrderConfirmed: [{ domain: 'order', state: 'CONFIRMED' }],
+  OrderCancelled: [{ domain: 'order', state: 'CANCELLED' }],
+  OrderFailed: [{ domain: 'order', state: 'FAILED' }],
+  InventoryReserved: [{ domain: 'inventory', state: 'RESERVED' }],
+  InventoryCommitted: [{ domain: 'inventory', state: 'COMMITTED' }],
+  InventoryReleased: [{ domain: 'inventory', state: 'RELEASED' }],
+  InventoryReservationFailed: [{ domain: 'inventory', state: 'FAILED' }],
+  PaymentAuthorized: [{ domain: 'payments', state: 'AUTHORIZED' }],
   PaymentCaptured: [
-    { domain: 'Payments', state: 'CAPTURED' },
-    { domain: 'Order', state: 'CONFIRMED' }
+    { domain: 'payments', state: 'CAPTURED' },
+    { domain: 'order', state: 'CONFIRMED' }
   ],
-  PaymentRefunded: [{ domain: 'Payments', state: 'REFUNDED' }],
-  PaymentFailed: [{ domain: 'Payments', state: 'FAILED' }],
-  ShipmentPrepared: [{ domain: 'Shipping', state: 'PREPARED' }],
-  ShipmentDispatched: [{ domain: 'Shipping', state: 'DISPATCHED' }],
-  ShipmentFailed: [{ domain: 'Shipping', state: 'FAILED' }]
+  PaymentRefunded: [{ domain: 'payments', state: 'REFUNDED' }],
+  PaymentFailed: [{ domain: 'payments', state: 'FAILED' }],
+  ShipmentPrepared: [{ domain: 'shipping', state: 'PREPARED' }],
+  ShipmentDispatched: [{ domain: 'shipping', state: 'DISPATCHED' }],
+  ShipmentFailed: [{ domain: 'shipping', state: 'FAILED' }]
 };
 
 type EventClassification = 'success' | 'compensation' | 'failure' | 'other';
@@ -100,9 +111,9 @@ function createLayout(screen: Widgets.Screen) {
     tags: true
   });
 
-  const domainBoxes: Record<Domain, Widgets.BoxElement> = {} as Record<Domain, Widgets.BoxElement>;
+  const domainBoxes: Record<DomainKey, Widgets.BoxElement> = {} as Record<DomainKey, Widgets.BoxElement>;
 
-  DOMAINS.forEach((domain, index) => {
+  DOMAINS.forEach(({ key, label }, index) => {
     const box = blessed.box({
       parent: screen,
       top: 1,
@@ -110,14 +121,14 @@ function createLayout(screen: Widgets.Screen) {
       width: '25%',
       height: '65%',
       border: { type: 'line' },
-      label: ` ${domain} `,
+      label: ` ${label} `,
       style: {
         border: { fg: 'white' },
         label: { fg: 'white', bold: true }
       }
     });
 
-    domainBoxes[domain] = box;
+    domainBoxes[key] = box;
   });
 
   const eventLogBox = blessed.box({
@@ -393,7 +404,7 @@ function start(): void {
   const screen = createScreen();
   const { domainBoxes, eventLogBox } = createLayout(screen);
   const logLines: string[] = [];
-  const highlightTimeouts = new Map<Domain, NodeJS.Timeout>();
+  const highlightTimeouts = new Map<DomainKey, NodeJS.Timeout>();
   const sagaStates = new Map<string, DomainState>();
   let activeCorrelationId: string | null = null;
 
@@ -412,10 +423,10 @@ function start(): void {
   const refreshDomainColumns = () => {
     const activeState = activeCorrelationId ? sagaStates.get(activeCorrelationId) : undefined;
 
-    DOMAINS.forEach((domain) => {
-      const state = activeState?.[domain];
+    DOMAINS.forEach(({ key }) => {
+      const state = activeState?.[key];
       const content = state ? chalk.bold(state) : chalk.gray('-');
-      domainBoxes[domain].setContent(content);
+      domainBoxes[key].setContent(content);
     });
   };
 
@@ -441,7 +452,7 @@ function start(): void {
     appendLogLine(`${chalk.gray(`[${formatTimestamp(new Date())}]`)} ${colorized}`);
   };
 
-  const highlightDomain = (domain: Domain, classification: EventClassification) => {
+  const highlightDomain = (domain: DomainKey, classification: EventClassification) => {
     const box = domainBoxes[domain];
 
     if (!box) {
@@ -482,6 +493,8 @@ function start(): void {
       activeCorrelationId = correlationId;
     }
 
+    const isActiveCorrelation = activeCorrelationId === correlationId;
+
     const stateUpdates = EVENT_STATE_UPDATES[envelope.eventName];
 
     if (stateUpdates) {
@@ -493,7 +506,9 @@ function start(): void {
     const details: string[] = [`Order=${orderId}`, `Trace=${envelope.traceId}`];
 
     if (flow) {
-      details.push(`from=${flow.from} → to=${flow.to}`);
+      const fromLabel = domainKeyToLabel[flow.from];
+      const toLabel = domainKeyToLabel[flow.to];
+      details.push(`from=${fromLabel} → to=${toLabel}`);
     }
 
     const logLine = `${timestamp} ${queueLabel} ${colorizeEvent(
@@ -501,8 +516,11 @@ function start(): void {
     )} (${details.join(', ')})`;
 
     appendLogLine(logLine);
-    refreshDomainColumns();
-    screen.render();
+
+    if (isActiveCorrelation) {
+      refreshDomainColumns();
+      screen.render();
+    }
 
     if (flow) {
       highlightDomain(flow.from, classification);
