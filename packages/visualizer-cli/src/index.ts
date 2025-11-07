@@ -1,20 +1,32 @@
 import process from 'node:process';
 
-import blessed, { type Widgets } from 'blessed';
 import chalk from 'chalk';
 
 import { eventEnvelopeSchema, type EventEnvelope } from '@reatiler/shared';
 import { loadScenario, type Scenario } from '@reatiler/saga-kernel';
 
+import { createRenderer } from './render';
+import { getExecutionRows, type DomainStatusUpdate, upsertExecution, FINISHED_RETENTION_MS } from './state';
+
 const DEFAULT_MESSAGE_QUEUE_URL = 'http://localhost:3005';
 const POLL_INTERVAL_MS = 1000;
-const MAX_LOG_LINES = 50;
-const HIGHLIGHT_DURATION_MS = 400;
 const VISUALIZER_QUEUE = 'visualizer';
+const DEFAULT_MAX_TRACES = 5;
+const REFRESH_INTERVAL_MS = Math.max(500, Math.floor(FINISHED_RETENTION_MS / 2));
 
-type DomainState = Record<string, string>;
-type StateUpdate = { domainId: string; status: string };
+type EventClassification = 'success' | 'compensation' | 'failure' | 'other';
 type EventFlow = { fromDomainId: string; toDomainId: string };
+
+type CliOptions = {
+  maxTraces: number;
+};
+
+type OnEvent = (envelope: EventEnvelope, context: { queue: string }) => void;
+
+type MirroredMessage = {
+  queue: string;
+  message: unknown;
+};
 
 const scenarioName = process.env.SCENARIO_NAME ?? 'retailer-happy-path';
 
@@ -28,63 +40,79 @@ try {
   process.exit(1);
 }
 
-const DOMAINS = scenario.domains.map((domain) => {
-  const label = domain.id.charAt(0).toUpperCase() + domain.id.slice(1);
-  return { id: domain.id, queue: domain.queue, label };
-});
+function parseCliOptions(argv: string[]): CliOptions {
+  let maxTraces = DEFAULT_MAX_TRACES;
 
-const queueToDomainId = DOMAINS.reduce<Record<string, string>>((acc, domain) => {
-  acc[domain.queue] = domain.id;
-  return acc;
-}, {});
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
 
-const scenarioEventNames = new Set(scenario.events.map((event) => event.name));
+    if (argument === '--max-traces') {
+      const value = argv[index + 1];
+      const parsed = Number.parseInt(value ?? '', 10);
 
-const EVENT_STATE_UPDATES = scenario.listeners.reduce<Record<string, StateUpdate[]>>(
-  (acc, listener) => {
-    listener.actions.forEach((action) => {
-      if (action.type !== 'set-state') {
-        return;
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        maxTraces = parsed;
       }
 
-      const updates = acc[listener.on.event] ?? [];
-      updates.push({ domainId: action.domain, status: action.status });
-      acc[listener.on.event] = updates;
-    });
+      index += 1;
+      continue;
+    }
 
-    return acc;
-  },
-  {}
-);
+    if (argument.startsWith('--max-traces=')) {
+      const [, raw] = argument.split('=', 2);
+      const parsed = Number.parseInt(raw ?? '', 10);
 
-const EVENT_FLOWS_TARGETS = scenario.listeners.reduce<Record<string, string[]>>(
-  (acc, listener) => {
-    listener.actions.forEach((action) => {
-      if (action.type !== 'emit') {
-        return;
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        maxTraces = parsed;
       }
+    }
+  }
 
-      const entries = acc[listener.on.event] ?? [];
-      entries.push(action.toDomain);
-      acc[listener.on.event] = entries;
-    });
+  return { maxTraces };
+}
 
-    return acc;
-  },
-  {}
-);
+const { maxTraces } = parseCliOptions(process.argv.slice(2));
 
-const createInitialDomainState = (): DomainState => {
-  return DOMAINS.reduce<Record<string, string>>((acc, domain) => {
-    acc[domain.id] = '-';
-    return acc;
-  }, {});
-};
+const DOMAINS = scenario.domains;
 
-type EventClassification = 'success' | 'compensation' | 'failure' | 'other';
+const queueToDomainId: Record<string, string> = {};
 
-function isScenarioEventName(eventName: string): boolean {
-  return scenarioEventNames.has(eventName);
+for (const domain of DOMAINS) {
+  queueToDomainId[domain.queue] = domain.id;
+}
+
+const scenarioEventNames = new Set<string>();
+
+for (const scenarioEvent of scenario.events) {
+  scenarioEventNames.add(scenarioEvent.name);
+}
+
+const EVENT_STATE_UPDATES: Record<string, DomainStatusUpdate[]> = {};
+
+for (const listener of scenario.listeners) {
+  for (const action of listener.actions) {
+    if (action.type !== 'set-state') {
+      continue;
+    }
+
+    const updates = EVENT_STATE_UPDATES[listener.on.event] ?? [];
+    updates.push({ domainId: action.domain, status: action.status });
+    EVENT_STATE_UPDATES[listener.on.event] = updates;
+  }
+}
+
+const EVENT_FLOWS_TARGETS: Record<string, string[]> = {};
+
+for (const listener of scenario.listeners) {
+  for (const action of listener.actions) {
+    if (action.type !== 'emit') {
+      continue;
+    }
+
+    const entries = EVENT_FLOWS_TARGETS[listener.on.event] ?? [];
+    entries.push(action.toDomain);
+    EVENT_FLOWS_TARGETS[listener.on.event] = entries;
+  }
 }
 
 const messageQueueUrl = process.env.MESSAGE_QUEUE_URL ?? DEFAULT_MESSAGE_QUEUE_URL;
@@ -101,68 +129,6 @@ let pushStatusMessage:
   | ((message: string, level: 'info' | 'warning' | 'error') => void)
   | undefined;
 
-type OnEvent = (envelope: EventEnvelope, context: { queue: string }) => void;
-
-function createScreen(): Widgets.Screen {
-  const screen = blessed.screen({ smartCSR: true });
-  screen.title = `Reatiler Workflow — ${scenario.name}`;
-  return screen;
-}
-
-function createLayout(screen: Widgets.Screen) {
-  blessed.box({
-    parent: screen,
-    top: 0,
-    left: 'center',
-    width: 'shrink',
-    height: 1,
-    content: chalk.bold(`Reatiler Workflow — ${scenario.name}`),
-    tags: true
-  });
-
-  const domainBoxes: Record<string, Widgets.BoxElement> = {};
-  const widthPercent = 100 / DOMAINS.length;
-  const columnWidth = `${widthPercent}%`;
-
-  DOMAINS.forEach(({ id, label }, index) => {
-    const box = blessed.box({
-      parent: screen,
-      top: 1,
-      left: `${index * widthPercent}%`,
-      width: columnWidth,
-      height: '65%',
-      border: { type: 'line' },
-      label: ` ${label} `,
-      style: {
-        border: { fg: 'white' },
-        label: { fg: 'white', bold: true }
-      }
-    });
-
-    domainBoxes[id] = box;
-  });
-
-  const eventLogBox = blessed.box({
-    parent: screen,
-    top: '66%',
-    left: 0,
-    width: '100%',
-    height: '34%',
-    border: { type: 'line' },
-    label: ' Event Log ',
-    style: {
-      border: { fg: 'white' },
-      label: { fg: 'white', bold: true }
-    },
-    scrollable: true,
-    alwaysScroll: true,
-    tags: true,
-    content: chalk.gray('Waiting for events...')
-  });
-
-  return { domainBoxes, eventLogBox };
-}
-
 function classifyEvent(eventName: string): EventClassification {
   const updates = EVENT_STATE_UPDATES[eventName];
 
@@ -170,13 +136,15 @@ function classifyEvent(eventName: string): EventClassification {
     return 'other';
   }
 
-  const statuses = updates.map((update) => update.status.toLowerCase());
+  const statuses = updates.map((update: DomainStatusUpdate) => update.status.toLowerCase());
 
-  if (statuses.some((status) => status.includes('fail') || status.includes('error'))) {
+  if (statuses.some((status: string) => status.includes('fail') || status.includes('error'))) {
     return 'failure';
   }
 
-  if (statuses.some((status) => status.includes('cancel') || status.includes('refund') || status.includes('release'))) {
+  if (
+    statuses.some((status: string) => status.includes('cancel') || status.includes('refund') || status.includes('release'))
+  ) {
     return 'compensation';
   }
 
@@ -194,19 +162,6 @@ function classificationToChalk(classification: EventClassification) {
     case 'other':
     default:
       return chalk.gray;
-  }
-}
-
-function classificationToBorderColor(classification: EventClassification): string {
-  switch (classification) {
-    case 'success':
-      return 'green';
-    case 'compensation':
-      return 'yellow';
-    case 'failure':
-      return 'red';
-    default:
-      return 'grey';
   }
 }
 
@@ -243,11 +198,6 @@ function extractEntityId(data: Record<string, unknown>): string {
   return 'n/a';
 }
 
-type MirroredMessage = {
-  queue: string;
-  message: unknown;
-};
-
 function logConnectionError(error: unknown) {
   if (connectionErrorLogged) {
     return;
@@ -256,10 +206,7 @@ function logConnectionError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   connectionErrorLogged = true;
 
-  pushStatusMessage?.(
-    `⚠️  Unable to reach message queue at ${messageQueueUrl}: ${message}`,
-    'warning'
-  );
+  pushStatusMessage?.(`⚠️  Unable to reach message queue at ${messageQueueUrl}: ${message}`, 'warning');
 }
 
 function logConnectionRecovered() {
@@ -381,65 +328,10 @@ function startPolling(onEvent: OnEvent): () => void {
   };
 }
 
-function updateBoxColor(box: Widgets.BoxElement, color: string) {
-  box.style = {
-    ...box.style,
-    border: { ...(box.style?.border ?? {}), fg: color },
-    label: { ...(box.style?.label ?? {}), fg: color, bold: true }
-  };
-}
-
 function start(): void {
-  const screen = createScreen();
-  const { domainBoxes, eventLogBox } = createLayout(screen);
-  const logLines: string[] = [];
-  const highlightTimeouts = new Map<string, NodeJS.Timeout>();
-  const sagaSnapshots = new Map<string, DomainState>();
-  let activeCorrelationId: string | null = configuredFilterCorrelationId;
-
-  const getOrCreateSagaSnapshot = (correlationId: string): DomainState => {
-    const existing = sagaSnapshots.get(correlationId);
-
-    if (existing) {
-      return existing;
-    }
-
-    const initialState: DomainState = createInitialDomainState();
-    sagaSnapshots.set(correlationId, initialState);
-    return initialState;
-  };
-
-  const refreshDomainColumns = () => {
-    const activeState = activeCorrelationId ? sagaSnapshots.get(activeCorrelationId) : undefined;
-
-    DOMAINS.forEach(({ id }) => {
-      const state = activeState?.[id];
-      const content = state && state !== '-' ? chalk.bold(state) : chalk.gray('-');
-      domainBoxes[id].setContent(content);
-    });
-  };
-
-  const appendLogLine = (line: string) => {
-    logLines.push(line);
-
-    if (logLines.length > MAX_LOG_LINES) {
-      logLines.splice(0, logLines.length - MAX_LOG_LINES);
-    }
-
-    eventLogBox.setContent(logLines.join('\n'));
-    eventLogBox.setScrollPerc(100);
-    screen.render();
-  };
-
-  pushStatusMessage = (message, level) => {
-    const colorized =
-      level === 'error'
-        ? chalk.red(message)
-        : level === 'warning'
-          ? chalk.yellow(message)
-          : chalk.cyan(message);
-    appendLogLine(`${chalk.gray(`[${formatTimestamp(new Date())}]`)} ${colorized}`);
-  };
+  const renderer = createRenderer(scenario.name, DOMAINS);
+  const { appendLogLine, renderExecutions } = renderer;
+  pushStatusMessage = renderer.pushStatusMessage;
 
   if (configuredFilterCorrelationId) {
     pushStatusMessage?.(
@@ -448,75 +340,44 @@ function start(): void {
     );
   }
 
-  const highlightDomain = (domainId: string, classification: EventClassification) => {
-    const box = domainBoxes[domainId];
+  const refreshExecutions = () => {
+    renderExecutions(getExecutionRows(DOMAINS, maxTraces, Date.now()));
+  };
 
-    if (!box) {
+  const refreshTimer = setInterval(refreshExecutions, REFRESH_INTERVAL_MS);
+
+  const stopPolling = startPolling((envelope, { queue }) => {
+    const correlationId = envelope.correlationId?.trim() ?? null;
+
+    if (configuredFilterCorrelationId && correlationId !== configuredFilterCorrelationId) {
       return;
     }
 
-    const color = classificationToBorderColor(classification);
-
-    updateBoxColor(box, color);
-    screen.render();
-
-    const existingTimeout = highlightTimeouts.get(domainId);
-
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-    }
-
-    const timeout = setTimeout(() => {
-      updateBoxColor(box, 'white');
-      screen.render();
-      highlightTimeouts.delete(domainId);
-    }, HIGHLIGHT_DURATION_MS);
-
-    highlightTimeouts.set(domainId, timeout);
-  };
-
-  const stopPolling = startPolling((envelope, { queue }) => {
-    const timestamp = chalk.gray(`[${formatTimestamp(new Date())}]`);
+    const timestamp = new Date();
+    const formattedTimestamp = chalk.gray(`[${formatTimestamp(timestamp)}]`);
     const queueLabel = chalk.cyan(`[${queue}]`);
     const classification = classifyEvent(envelope.eventName);
     const colorizeEvent = classificationToChalk(classification);
     const queueDomainId = queueToDomainId[queue];
     const flowTargets = EVENT_FLOWS_TARGETS[envelope.eventName] ?? [];
     const flows: EventFlow[] = queueDomainId
-      ? flowTargets.map((toDomainId) => ({ fromDomainId: queueDomainId, toDomainId }))
+      ? flowTargets.map((toDomainId: string) => ({ fromDomainId: queueDomainId, toDomainId }))
       : [];
     const entityId = extractEntityId(envelope.data);
-    const correlationId = envelope.correlationId?.trim();
+    const traceId = envelope.traceId?.trim() ?? null;
 
-    if (!correlationId) {
-      pushStatusMessage?.(
-        `⚠️  Received event without correlationId: ${envelope.eventName}`,
-        'warning'
-      );
+    const stateUpdates = EVENT_STATE_UPDATES[envelope.eventName] ?? [];
+
+    const result = upsertExecution(
+      { traceId, correlationId, domains: DOMAINS, updates: stateUpdates },
+      timestamp.getTime()
+    );
+
+    if (!result) {
       return;
     }
 
-    const sagaSnapshot = getOrCreateSagaSnapshot(correlationId);
-
-    const stateUpdates = EVENT_STATE_UPDATES[envelope.eventName];
-
-    if (stateUpdates) {
-      stateUpdates.forEach(({ domainId, status }) => {
-        sagaSnapshot[domainId] = status;
-      });
-    }
-
-    if (!configuredFilterCorrelationId && activeCorrelationId === null) {
-      activeCorrelationId = correlationId;
-    }
-
-    const isActiveCorrelation = activeCorrelationId === correlationId;
-
-    const details: string[] = [
-      `Entity=${entityId}`,
-      `Trace=${envelope.traceId}`,
-      `Correlation=${correlationId}${isActiveCorrelation ? '' : ' (inactive)'}`
-    ];
+    const details: string[] = [`Entity=${entityId}`, `Trace=${result.displayId}`, `Correlation=${correlationId ?? 'n/a'}`];
 
     if (flows.length > 0) {
       flows.forEach(({ fromDomainId, toDomainId }) => {
@@ -524,36 +385,18 @@ function start(): void {
       });
     }
 
-    const logLine = `${timestamp} ${queueLabel} ${colorizeEvent(
-      envelope.eventName
-    )} (${details.join(', ')})`;
+    appendLogLine(
+      `${formattedTimestamp} ${queueLabel} ${colorizeEvent(envelope.eventName)} (${details.join(', ')})`
+    );
 
-    appendLogLine(logLine);
+    refreshExecutions();
 
-    if (isActiveCorrelation) {
-      refreshDomainColumns();
-      screen.render();
-    }
-
-    if (isActiveCorrelation && flows.length > 0) {
-      flows.forEach(({ fromDomainId, toDomainId }) => {
-        highlightDomain(fromDomainId, classification);
-
-        if (toDomainId !== fromDomainId) {
-          highlightDomain(toDomainId, classification);
-        }
-      });
-    }
-  
     if (!queueDomainId && !unknownQueuesLogged.has(queue)) {
       unknownQueuesLogged.add(queue);
-      pushStatusMessage?.(
-        `⚠️  Unknown queue "${queue}" for current scenario.`,
-        'warning'
-      );
+      pushStatusMessage?.(`⚠️  Unknown queue "${queue}" for current scenario.`, 'warning');
     }
 
-    if (!isScenarioEventName(envelope.eventName) && !unknownEventsLogged.has(envelope.eventName)) {
+    if (!scenarioEventNames.has(envelope.eventName) && !unknownEventsLogged.has(envelope.eventName)) {
       unknownEventsLogged.add(envelope.eventName);
       pushStatusMessage?.(
         `⚠️  Unknown event "${envelope.eventName}" for scenario "${scenarioName}".`,
@@ -564,20 +407,15 @@ function start(): void {
 
   const shutdown = () => {
     stopPolling();
-
-    for (const timeout of highlightTimeouts.values()) {
-      clearTimeout(timeout);
-    }
-
-    screen.destroy();
+    clearInterval(refreshTimer);
+    renderer.destroy();
     process.exit(0);
   };
 
-  screen.key(['C-c', 'q'], shutdown);
+  renderer.screen.key(['C-c', 'q'], shutdown);
   process.once('SIGTERM', shutdown);
 
-  refreshDomainColumns();
-  screen.render();
+  refreshExecutions();
 }
 
 start();
