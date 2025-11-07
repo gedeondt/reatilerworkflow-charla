@@ -1,7 +1,12 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { eventEnvelopeSchema } from '@reatiler/shared';
+import { eventEnvelopeSchema, type EventEnvelope } from '@reatiler/shared';
 import { push, pop } from './queue.js';
+
+type MirroredMessage = {
+  queue: string;
+  message: EventEnvelope;
+};
 
 export async function routes(app: FastifyInstance) {
   const paramsName = z.object({ name: z.string().min(1) });
@@ -10,6 +15,13 @@ export async function routes(app: FastifyInstance) {
     const { name } = paramsName.parse(req.params);
     const body = eventEnvelopeSchema.parse(req.body);
     push(name, body);
+
+    const mirrored: MirroredMessage = {
+      queue: name,
+      message: body
+    };
+
+    push('visualizer', mirrored);
     app.log.info(
       {
         queue: name,
@@ -23,7 +35,7 @@ export async function routes(app: FastifyInstance) {
 
   app.post('/queues/:name/pop', async (req) => {
     const { name } = paramsName.parse(req.params);
-    const msg = pop(name);
+    const msg = pop<EventEnvelope>(name);
     if (!msg) {
       return { status: 'empty' };
     }

@@ -12,6 +12,7 @@ const HIGHLIGHT_DURATION_MS = 400;
 
 const QUEUES = ['orders', 'inventory', 'payments', 'shipping'] as const;
 const DOMAINS = ['Order', 'Inventory', 'Payments', 'Shipping'] as const;
+const VISUALIZER_QUEUE = 'visualizer';
 
 type QueueName = (typeof QUEUES)[number];
 type Domain = (typeof DOMAINS)[number];
@@ -43,6 +44,10 @@ let pushStatusMessage:
   | undefined;
 
 type OnEvent = (envelope: EventEnvelope, context: { queue: QueueName }) => void;
+
+function isKnownQueue(queue: string): queue is QueueName {
+  return (QUEUES as readonly string[]).includes(queue);
+}
 
 function createScreen(): Widgets.Screen {
   const screen = blessed.screen({ smartCSR: true });
@@ -193,11 +198,10 @@ function extractOrderId(data: Record<string, unknown>): string {
   return 'n/a';
 }
 
-function buildQueueUrl(queue: QueueName): URL {
-  const url = new URL(`/queues/${encodeURIComponent(queue)}/pop`, messageQueueUrl);
-  url.searchParams.set('peek', 'true');
-  return url;
-}
+type MirroredMessage = {
+  queue: string;
+  message: unknown;
+};
 
 function logConnectionError(error: unknown) {
   if (connectionErrorLogged) {
@@ -222,8 +226,8 @@ function logConnectionRecovered() {
   pushStatusMessage?.('✅ Connection to message queue restored.', 'info');
 }
 
-async function pollQueue(queue: QueueName, onEvent: OnEvent): Promise<void> {
-  const url = buildQueueUrl(queue);
+async function pollVisualizerQueue(onEvent: OnEvent): Promise<void> {
+  const url = new URL(`/queues/${VISUALIZER_QUEUE}/pop`, messageQueueUrl);
 
   let response: Response;
 
@@ -264,11 +268,25 @@ async function pollQueue(queue: QueueName, onEvent: OnEvent): Promise<void> {
 
   const message = (payload as { message?: unknown }).message;
 
-  if (!message) {
+  if (!message || typeof message !== 'object') {
     return;
   }
 
-  const parsedEnvelope = eventEnvelopeSchema.safeParse(message);
+  const { queue, message: envelopeCandidate } = message as MirroredMessage;
+
+  if (typeof queue !== 'string') {
+    return;
+  }
+
+  if (!isKnownQueue(queue)) {
+    pushStatusMessage?.(
+      `⚠️  Received mirrored event for unknown queue "${queue}". Ignoring.`,
+      'warning'
+    );
+    return;
+  }
+
+  const parsedEnvelope = eventEnvelopeSchema.safeParse(envelopeCandidate);
 
   if (!parsedEnvelope.success) {
     pushStatusMessage?.(
@@ -292,28 +310,19 @@ function startPolling(onEvent: OnEvent): () => void {
   let isPolling = false;
   let stopped = false;
 
-  const pollQueues = async () => {
+  const poll = async () => {
     if (stopped) {
       return;
     }
 
-    for (const queue of QUEUES) {
-      if (stopped) {
-        break;
-      }
-
-      try {
-        await pollQueue(queue, onEvent);
-      } catch (error) {
-        pushStatusMessage?.(
-          `❌ Unexpected error while polling "${queue}": ${String(error)}`,
-          'error'
-        );
-      }
+    try {
+      await pollVisualizerQueue(onEvent);
+    } catch (error) {
+      pushStatusMessage?.(`❌ Unexpected error while polling: ${String(error)}`, 'error');
     }
   };
 
-  void pollQueues();
+  void poll();
 
   const timer = setInterval(async () => {
     if (isPolling || stopped) {
@@ -323,7 +332,7 @@ function startPolling(onEvent: OnEvent): () => void {
     isPolling = true;
 
     try {
-      await pollQueues();
+      await poll();
     } finally {
       isPolling = false;
     }
