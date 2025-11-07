@@ -165,7 +165,7 @@ export function createEvent<K extends EventName>(
 
   const { traceId, correlationId, causationId } = opts;
 
-  const baseEnvelope: EventEnvelope = {
+  const envelope: EventEnvelope = {
     eventName,
     version: 1,
     eventId: randomUUID(),
@@ -176,13 +176,14 @@ export function createEvent<K extends EventName>(
     data: parsedData as Record<string, unknown>
   };
 
-  const validatedEnvelope = eventEnvelopeSchema.parse(baseEnvelope);
-
-  return {
+  const validatedEnvelope = eventEnvelopeSchema.parse(envelope);
+  const typedEnvelope: EventEnvelope & { eventName: K; data: EventData<K> } = {
     ...validatedEnvelope,
     eventName,
     data: parsedData
-  } as EventEnvelope & { eventName: K; data: EventData<K> };
+  };
+
+  return typedEnvelope;
 }
 
 export function parseEvent<K extends EventName>(
