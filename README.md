@@ -61,6 +61,22 @@ Cada servicio contará con scripts de desarrollo orquestados mediante Turborepo.
 pnpm dev
 ```
 
+## Visualizador de escenarios
+
+El CLI de visualización consume únicamente la definición de escenario publicada en `business/*.json` y los eventos espejados por la cola `visualizer`. Cualquier cambio en el JSON se refleja automáticamente en columnas, estados y flujos.
+
+```bash
+pnpm install
+pnpm dev                               # levanta cola y servicios
+pnpm -F @reatiler/visualizer-cli dev   # abre el visualizador en modo watch
+
+curl -s -X POST http://localhost:3001/orders \
+  -H 'content-type: application/json' \
+  -d '{"requestId":"req-1","lines":[{"sku":"SKU-1","qty":1}],"amount":100}'
+```
+
+De forma predeterminada se carga el escenario `business/retailer-happy-path.json`, aunque puede seleccionarse otro mediante la variable `SCENARIO_NAME`. El visualizador construye dinámicamente columnas, estados y flujos a partir del contenido del escenario.
+
 ## Filosofía Spec-as-Source
 
 Las especificaciones son la fuente de verdad para implementación, pruebas y operación. Las ADR, políticas y escenarios documentados en este repositorio definen los contratos que los equipos deben respetar. Los agentes automatizados (Generator, Linter y Evaluator) se apoyarán en estas especificaciones para asegurar consistencia y gobernanza.
