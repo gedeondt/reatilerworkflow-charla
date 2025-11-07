@@ -1,0 +1,120 @@
+{
+  "name": "Retailer Happy Path Saga",
+  "version": 1,
+  "domains": [
+    { "id": "order", "queue": "orders" },
+    { "id": "inventory", "queue": "inventory" },
+    { "id": "payments", "queue": "payments" },
+    { "id": "shipping", "queue": "shipping" }
+  ],
+  "events": [
+    { "name": "OrderPlaced" },
+    { "name": "InventoryReserved" },
+    { "name": "PaymentAuthorized" },
+    { "name": "ShipmentPrepared" },
+    { "name": "PaymentCaptured" },
+    { "name": "OrderConfirmed" }
+  ],
+  "listeners": [
+    {
+      "id": "order-on-OrderPlaced",
+      "on": {
+        "event": "OrderPlaced",
+        "delayMs": 20
+      },
+      "actions": [
+        {
+          "type": "set-state",
+          "domain": "order",
+          "status": "PLACED"
+        },
+        {
+          "type": "emit",
+          "event": "InventoryReserved",
+          "toDomain": "inventory"
+        }
+      ]
+    },
+    {
+      "id": "inventory-on-InventoryReserved",
+      "on": {
+        "event": "InventoryReserved",
+        "delayMs": 30
+      },
+      "actions": [
+        {
+          "type": "set-state",
+          "domain": "inventory",
+          "status": "RESERVED"
+        },
+        {
+          "type": "emit",
+          "event": "PaymentAuthorized",
+          "toDomain": "payments"
+        }
+      ]
+    },
+    {
+      "id": "payments-on-PaymentAuthorized",
+      "on": {
+        "event": "PaymentAuthorized",
+        "delayMs": 40
+      },
+      "actions": [
+        {
+          "type": "set-state",
+          "domain": "payments",
+          "status": "AUTHORIZED"
+        },
+        {
+          "type": "emit",
+          "event": "ShipmentPrepared",
+          "toDomain": "shipping"
+        }
+      ]
+    },
+    {
+      "id": "shipping-on-ShipmentPrepared",
+      "on": {
+        "event": "ShipmentPrepared",
+        "delayMs": 50
+      },
+      "actions": [
+        {
+          "type": "set-state",
+          "domain": "shipping",
+          "status": "PREPARED"
+        },
+        {
+          "type": "emit",
+          "event": "PaymentCaptured",
+          "toDomain": "order"
+        }
+      ]
+    },
+    {
+      "id": "order-on-PaymentCaptured",
+      "on": {
+        "event": "PaymentCaptured",
+        "delayMs": 25
+      },
+      "actions": [
+        {
+          "type": "set-state",
+          "domain": "payments",
+          "status": "CAPTURED"
+        },
+        {
+          "type": "set-state",
+          "domain": "order",
+          "status": "CONFIRMED"
+        },
+        {
+          "type": "emit",
+          "event": "OrderConfirmed",
+          "toDomain": "order"
+        }
+      ]
+    }
+  ]
+}
