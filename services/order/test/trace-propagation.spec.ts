@@ -45,7 +45,7 @@ describe('order trace propagation', () => {
 
     await handler({ ...incoming, eventId: 'evt-incoming' });
 
-    const published = await bus.pop('orders-log');
+    const published = await bus.pop('orders');
 
     expect(published?.traceId).toBe('trace-xyz');
     expect(published?.correlationId).toBe('order-123');

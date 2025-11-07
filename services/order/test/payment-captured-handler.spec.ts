@@ -62,7 +62,7 @@ describe('order event handlers', () => {
     const order = store.get('order-1');
     expect(order?.status).toBe('CONFIRMED');
 
-    const published = await bus.pop('orders-log');
+    const published = await bus.pop('orders');
     expect(published?.eventName).toBe('OrderConfirmed');
     expect(published?.traceId).toBe(incoming.traceId);
     expect(published?.correlationId).toBe('order-1');
