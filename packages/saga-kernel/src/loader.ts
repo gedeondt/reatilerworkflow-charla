@@ -3,38 +3,38 @@ import { resolve } from 'node:path';
 
 import { scenarioSchema, type Scenario } from './schema.js';
 
+function resolveScenarioPath(name: string): string {
+  // Siempre busca en `<cwd>/business/<name>.json`
+  return resolve(process.cwd(), 'business', `${name}.json`);
+}
+
 export function loadScenario(name: string): Scenario {
-  const relativePath = `business/${name}.json`;
-  const filePath = resolve(process.cwd(), relativePath);
+  const filePath = resolveScenarioPath(name);
 
-  let rawContent: string;
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf8');
+  } catch (error) {
+    throw new Error(
+      `Failed to read scenario file "${name}" at ${filePath}: ${(error as Error).message}`
+    );
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON in scenario file "${name}" at ${filePath}: ${(error as Error).message}`
+    );
+  }
 
   try {
-    rawContent = readFileSync(filePath, 'utf-8');
+    return scenarioSchema.parse(json);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const err = error as NodeJS.ErrnoException | undefined;
-
-    if (err?.code === 'ENOENT') {
-      throw new Error(`Scenario file "${relativePath}" was not found.`);
+    if (error instanceof Error) {
+      throw new Error(`Scenario "${name}" does not match schema: ${error.message}`);
     }
-
-    throw new Error(`Unable to read scenario file "${relativePath}": ${message}`);
-  }
-
-  let parsedContent: unknown;
-
-  try {
-    parsedContent = JSON.parse(rawContent) as unknown;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Scenario file "${relativePath}" contains invalid JSON: ${message}`);
-  }
-
-  try {
-    return scenarioSchema.parse(parsedContent);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Scenario file "${relativePath}" is not valid: ${message}`);
+    throw error;
   }
 }

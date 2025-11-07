@@ -5,9 +5,9 @@ import type { EventBus, EventEnvelope } from '@reatiler/shared';
 import type { Listener, ListenerAction, Scenario } from './schema.js';
 
 export type Logger = {
-  info: (...args: any[]) => void;
-  error: (...args: any[]) => void;
-  debug: (...args: any[]) => void;
+  debug: (...args: unknown[]) => void;
+  info: (...args: unknown[]) => void;
+  error: (...args: unknown[]) => void;
 };
 
 export type ScenarioRuntimeOptions = {
