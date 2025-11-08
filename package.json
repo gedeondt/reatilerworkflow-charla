@@ -6,6 +6,7 @@
   "packageManager": "pnpm@8.15.0",
   "scripts": {
     "dev": "turbo run dev --parallel",
+    "stack:dev": "node scripts/dev-stack.mjs",
     "build": "turbo run build",
     "test": "pnpm run test:unit && pnpm run test:e2e",
     "test:unit": "turbo run test:unit",

@@ -46,6 +46,16 @@ pnpm -F message-queue dev
 pnpm -F scenario-runner dev
 ```
 
+## Levantar todo con un escenario
+
+```bash
+pnpm stack:dev retailer-happy-path
+    • Levanta message-queue, scenario-runner y el visualizador.
+    • Usa el escenario business/retailer-happy-path.json.
+    • Para futuros escenarios: añade business/<otro>.json válido y ejecuta:
+pnpm stack:dev <otro>
+```
+
 ### Logging
 
 El nivel de logs de los servicios puede ajustarse mediante la variable de entorno `LOG_LEVEL`. Por defecto se utiliza `warn` para evitar ruido al hacer polling en la cola, pero es posible elevarlo cuando se necesite más visibilidad:
