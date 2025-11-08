@@ -55,6 +55,7 @@ type ScenarioListPayload = { scenarios?: Array<{ name?: string; domainsCount?: n
 type ScenarioInfoPayload = { name?: string; domains?: Array<{ id?: string; queue?: string }> };
 
 type LogLevel = 'info' | 'warning' | 'error';
+type UiMode = 'visualizer' | 'scenario-menu';
 
 const messageQueueUrl = process.env.MESSAGE_QUEUE_URL ?? DEFAULT_MESSAGE_QUEUE_URL;
 const scenarioRunnerUrl = process.env.SCENARIO_RUNNER_URL ?? DEFAULT_SCENARIO_RUNNER_URL;
@@ -75,6 +76,7 @@ let seenEvents = new Set<string>();
 let unknownQueuesLogged = new Set<string>();
 let unknownEventsLogged = new Set<string>();
 let pushStatusMessage: ((message: string, level: LogLevel) => void) | undefined;
+let uiMode: UiMode = 'visualizer';
 
 function renderLayout(state: VisualizerState): void {
   if (!runtimeResources) {
@@ -90,6 +92,41 @@ function renderLayout(state: VisualizerState): void {
 
 function renderSystemMessage(message: string, level: LogLevel = 'info'): void {
   pushStatusMessage?.(message, level);
+}
+
+function enableVisualizerInput(): void {
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+  }
+
+  process.stdin.resume();
+  process.stdin.removeListener('data', onKey);
+  process.stdin.on('data', onKey);
+}
+
+function disableVisualizerInput(): void {
+  process.stdin.removeListener('data', onKey);
+
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+  }
+}
+
+function onKey(chunk: Buffer): void {
+  if (uiMode !== 'visualizer') {
+    return;
+  }
+
+  const inputKey = chunk.toString('utf8');
+
+  if (inputKey === '\u0003' || inputKey === 'q' || inputKey === 'Q') {
+    shutdown();
+    return;
+  }
+
+  if (inputKey === 's' || inputKey === 'S') {
+    void switchScenarioInteractive();
+  }
 }
 
 function parseCliOptions(argv: string[]): CliOptions {
@@ -298,7 +335,7 @@ function startPolling(onEvent: OnEvent): () => void {
   let stopped = false;
 
   const poll = async () => {
-    if (stopped || !isRunning || isSwitching) {
+    if (stopped || !isRunning || isSwitching || uiMode !== 'visualizer') {
       return;
     }
 
@@ -312,7 +349,7 @@ function startPolling(onEvent: OnEvent): () => void {
   void poll();
 
   const timer = setInterval(async () => {
-    if (isPolling || stopped || !isRunning) {
+    if (isPolling || stopped || !isRunning || uiMode !== 'visualizer') {
       return;
     }
 
@@ -683,7 +720,7 @@ function registerShutdownHandler(): void {
   });
 }
 
-async function activateScenario(name: string, infoOverride?: ScenarioInfoResponse): Promise<void> {
+async function activateScenario(name: string, infoOverride?: ScenarioInfoResponse): Promise<VisualizerState> {
   let scenario: Scenario;
 
   try {
@@ -713,18 +750,17 @@ async function activateScenario(name: string, infoOverride?: ScenarioInfoRespons
   renderSystemMessage('Pulsa "s" para cambiar de escenario.', 'info');
 
   const refreshExecutions = () => {
-    if (!isRunning || isSwitching) {
+    if (!isRunning || isSwitching || uiMode !== 'visualizer') {
       return;
     }
 
     renderer.renderExecutions(getExecutionRows(domains, globalMaxTraces, Date.now()));
   };
 
-  refreshExecutions();
   const refreshTimer = setInterval(refreshExecutions, REFRESH_INTERVAL_MS);
 
   const stopPolling = startPolling((envelope, { queue }) => {
-    if (isSwitching) {
+    if (isSwitching || uiMode !== 'visualizer') {
       return;
     }
 
@@ -790,14 +826,9 @@ async function activateScenario(name: string, infoOverride?: ScenarioInfoRespons
   runtimeResources = { renderer, refreshTimer, stopPolling, context };
 
   registerShutdownHandler();
-
-  renderer.screen.key(['C-c', 'q'], shutdown);
-  renderer.screen.key(['s', 'S'], () => {
-    void switchScenarioInteractive();
-  });
-
   isRunning = true;
-  renderLayout({ scenarioName: scenario.name, domains });
+
+  return { scenarioName: scenario.name, domains };
 }
 
 function cloneScenarioInfo({ name, domains }: ScenarioInfoResponse): ScenarioInfoResponse {
@@ -857,7 +888,7 @@ async function readNumberOrEmpty(): Promise<number | null> {
   const parsed = Number.parseInt(line, 10);
 
   if (Number.isNaN(parsed) || parsed <= 0) {
-    return -1;
+    return null;
   }
 
   return parsed - 1;
@@ -868,34 +899,32 @@ async function waitForEnter(): Promise<void> {
 }
 
 async function switchScenarioInteractive(): Promise<void> {
-  if (isSwitching || !runtimeResources) {
+  if (uiMode !== 'visualizer' || isSwitching || !runtimeResources) {
     return;
   }
 
+  uiMode = 'scenario-menu';
   isSwitching = true;
-  isRunning = false;
 
-  const previousContext = runtimeResources.context;
-  const previousScenarioInfo: ScenarioInfoResponse = {
-    name: previousContext.scenario.name,
-    domains: previousContext.domains.map((domain) => ({ id: domain.id, queue: domain.queue }))
-  };
+  disableVisualizerInput();
 
-  const pendingMessages: Array<{ text: string; level: LogLevel }> = [];
+  const previousScenarioInfo = cloneScenarioInfo({
+    name: runtimeResources.context.scenario.name,
+    domains: runtimeResources.context.domains
+  });
 
   cleanupResources();
+  isRunning = false;
 
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(false);
-  }
-  process.stdin.resume();
-
-  let scenarioToActivate: ScenarioInfoResponse | null = null;
-  let reapplyPreviousScenario = false;
+  let scenarioInfoForActivation: ScenarioInfoResponse = previousScenarioInfo;
+  let scenarioInfoOverride: ScenarioInfoResponse | undefined = previousScenarioInfo;
+  let activateInFinally = true;
+  const pendingMessages: Array<{ text: string; level: LogLevel }> = [];
 
   try {
     console.clear();
     console.log('=== Cambiar de escenario ===');
+    console.log('');
 
     let response: Response;
 
@@ -916,77 +945,55 @@ async function switchScenarioInteractive(): Promise<void> {
       return;
     }
 
-    let body: unknown;
+    let payload: ScenarioListPayload | null = null;
 
     try {
-      body = await response.json();
+      payload = (await response.json()) as ScenarioListPayload;
     } catch (error) {
-      console.log(`No se pudo interpretar /scenarios (${String(error)}). Pulsa Enter para volver.`);
+      console.log('No se pudo parsear /scenarios. Pulsa Enter para volver.');
       await waitForEnter();
-      pendingMessages.push({ text: 'No se pudo interpretar la lista de escenarios.', level: 'error' });
+      pendingMessages.push({ text: 'No se pudo parsear la lista de escenarios.', level: 'error' });
       return;
     }
 
-    const rawScenarios = Array.isArray((body as ScenarioListPayload).scenarios)
-      ? (body as ScenarioListPayload).scenarios
-      : Array.isArray(body)
-        ? body
-        : [];
+    const scenarioEntries = Array.isArray(payload?.scenarios)
+      ? payload.scenarios.filter(
+          (entry): entry is { name: string; domainsCount?: number } =>
+            Boolean(entry && typeof entry.name === 'string')
+        )
+      : [];
 
-    if (!Array.isArray(rawScenarios) || rawScenarios.length === 0) {
-      console.log('No hay escenarios disponibles. Pulsa Enter para volver.');
+    if (scenarioEntries.length === 0) {
+      console.log('No se encontraron escenarios disponibles. Pulsa Enter para volver.');
       await waitForEnter();
-      pendingMessages.push({ text: 'No hay escenarios disponibles.', level: 'warning' });
+      pendingMessages.push({ text: 'No hay escenarios disponibles.', level: 'error' });
       return;
     }
 
-    const scenarioNames: string[] = [];
-
-    rawScenarios.forEach((scenario) => {
-      const candidate =
-        typeof scenario === 'string'
-          ? scenario
-          : scenario && typeof scenario.name === 'string'
-            ? scenario.name
-            : null;
-
-      if (candidate && candidate.trim().length > 0) {
-        scenarioNames.push(candidate.trim());
-      }
+    scenarioEntries.forEach((entry, index) => {
+      const marker = entry.name === previousScenarioInfo.name ? ' (actual)' : '';
+      console.log(`[${index + 1}] ${entry.name}${marker}`);
     });
 
-    if (scenarioNames.length === 0) {
-      console.log('No hay escenarios disponibles. Pulsa Enter para volver.');
-      await waitForEnter();
-      pendingMessages.push({ text: 'No hay escenarios disponibles.', level: 'warning' });
-      return;
-    }
-
-    scenarioNames.forEach((name, index) => {
-      const marker = name === previousScenarioInfo.name ? ' (actual)' : '';
-      console.log(`[${index + 1}] ${name}${marker}`);
-    });
-
-    console.log('Selecciona escenario (Enter para cancelar):');
-
+    console.log('');
+    process.stdout.write('Selecciona escenario (Enter para cancelar): ');
     const selectedIndex = await readNumberOrEmpty();
 
     if (selectedIndex === null) {
-      pendingMessages.push({ text: 'Cambio de escenario cancelado.', level: 'info' });
       return;
     }
 
-    if (selectedIndex < 0 || selectedIndex >= scenarioNames.length) {
+    if (selectedIndex < 0 || selectedIndex >= scenarioEntries.length) {
       console.log('Selección inválida. Pulsa Enter para volver.');
       await waitForEnter();
       pendingMessages.push({ text: 'Selección inválida. Se mantiene el escenario actual.', level: 'warning' });
       return;
     }
 
-    const scenarioName = scenarioNames[selectedIndex];
+    const selectedScenario = scenarioEntries[selectedIndex];
 
-    if (scenarioName === previousScenarioInfo.name) {
-      pendingMessages.push({ text: `El escenario "${scenarioName}" ya está activo.`, level: 'info' });
+    if (selectedScenario.name === previousScenarioInfo.name) {
+      pendingMessages.push({ text: `El escenario "${selectedScenario.name}" ya está activo.`, level: 'info' });
       return;
     }
 
@@ -994,24 +1001,22 @@ async function switchScenarioInteractive(): Promise<void> {
       await fetch(new URL('/admin/reset', messageQueueUrl), { method: 'POST' });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      console.warn('No se pudo resetear colas:', detail);
+      console.warn(`⚠️  No se pudo resetear colas: ${detail}`);
       pendingMessages.push({ text: `⚠️  No se pudo resetear colas: ${detail}`, level: 'warning' });
     }
 
     const switchResponse = await fetch(new URL('/scenario', scenarioRunnerUrl), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: scenarioName })
+      body: JSON.stringify({ name: selectedScenario.name })
     });
 
     if (!switchResponse.ok) {
       console.log(`No se pudo cambiar de escenario (${switchResponse.status}). Pulsa Enter para volver.`);
       await waitForEnter();
-      pendingMessages.push({ text: `No se pudo cambiar al escenario "${scenarioName}".`, level: 'error' });
+      pendingMessages.push({ text: `No se pudo cambiar al escenario "${selectedScenario.name}".`, level: 'error' });
       return;
     }
-
-    reapplyPreviousScenario = true;
 
     const currentResponse = await fetch(new URL('/scenario', scenarioRunnerUrl));
 
@@ -1025,43 +1030,49 @@ async function switchScenarioInteractive(): Promise<void> {
     const currentPayload = (await currentResponse.json()) as ScenarioInfoPayload;
     const parsedInfo = resetStateWithScenario(currentPayload);
 
-    scenarioToActivate = parsedInfo;
-    reapplyPreviousScenario = false;
-    pendingMessages.push({ text: `✅ Escenario activo: ${scenarioName}.`, level: 'info' });
+    scenarioInfoForActivation = parsedInfo;
+    scenarioInfoOverride = parsedInfo;
+
+    console.clear();
+    uiMode = 'visualizer';
+    const visualizerState = await activateScenario(parsedInfo.name, parsedInfo);
+    renderLayout(visualizerState);
+    activateInFinally = false;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.log(`No se pudo cambiar de escenario: ${detail}. Pulsa Enter para volver.`);
     await waitForEnter();
     pendingMessages.push({ text: `No se pudo cambiar de escenario: ${detail}.`, level: 'error' });
   } finally {
-    if (process.stdin.isTTY) {
-      process.stdin.setRawMode(true);
-    }
-    process.stdin.resume();
+    if (activateInFinally) {
+      console.clear();
+      uiMode = 'visualizer';
 
-    const targetScenario = scenarioToActivate ?? previousScenarioInfo;
-
-    try {
-      if (scenarioToActivate) {
-        await activateScenario(targetScenario.name, cloneScenarioInfo(targetScenario));
-      } else if (reapplyPreviousScenario) {
-        await activateScenario(targetScenario.name);
-      } else {
-        await activateScenario(targetScenario.name, cloneScenarioInfo(targetScenario));
+      try {
+        const state = await activateScenario(
+          scenarioInfoForActivation.name,
+          scenarioInfoOverride ? cloneScenarioInfo(scenarioInfoOverride) : undefined
+        );
+        renderLayout(state);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.error(`❌ Falló la activación del escenario "${scenarioInfoForActivation.name}": ${detail}`);
       }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      console.error(`❌ Falló la activación del escenario "${targetScenario.name}": ${detail}`);
     }
 
-    for (const message of pendingMessages) {
-      renderSystemMessage(message.text, message.level);
-    }
+    enableVisualizerInput();
 
     isRunning = true;
     isSwitching = false;
+
+    if (pendingMessages.length > 0) {
+      for (const message of pendingMessages) {
+        renderSystemMessage(message.text, message.level);
+      }
+    }
   }
 }
+
 
 async function main() {
   try {
@@ -1089,7 +1100,11 @@ async function main() {
       throw new Error('No scenario selected.');
     }
 
-    await activateScenario(selectedScenario);
+    const state = await activateScenario(selectedScenario);
+    console.clear();
+    uiMode = 'visualizer';
+    renderLayout(state);
+    enableVisualizerInput();
   } catch (error) {
     console.error(`❌ No se pudo iniciar el visualizador: ${String(error)}`);
     process.exit(1);
