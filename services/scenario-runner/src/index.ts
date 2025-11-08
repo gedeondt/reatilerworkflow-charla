@@ -23,6 +23,23 @@ const SCENARIO_POLL_INTERVAL_MS = 2000;
 
 const app = Fastify({ logger: true });
 
+app.addHook('onResponse', (request, reply, done) => {
+  const [path] = request.url.split('?');
+  const isRoutineRoute =
+    path === '/traces' ||
+    path === '/logs' ||
+    path === '/scenario' ||
+    path.startsWith('/kv/');
+
+  if (isRoutineRoute) {
+    done();
+    return;
+  }
+
+  request.log.info({ url: request.url, statusCode: reply.statusCode }, 'handled');
+  done();
+});
+
 let currentScenarioName: string | null = null;
 let currentScenario: Scenario | null = null;
 let currentRuntime: ScenarioRuntime | null = null;
