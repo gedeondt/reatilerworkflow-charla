@@ -30,6 +30,7 @@ app.addHook('onResponse', (request, reply, done) => {
   request.log.info({ url: request.url, statusCode: reply.statusCode }, 'handled');
   done();
 });
+
 const store = new Map<string, NamespaceStore>();
 
 const getNamespace = (namespace: string): NamespaceStore => {

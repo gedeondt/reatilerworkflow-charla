@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "stack:dev": "node scripts/dev-stack.mjs",
+    "stack:dev:web": "node scripts/dev-stack.mjs --with-web",
     "build": "turbo run build",
     "test": "pnpm run test:unit && pnpm run test:e2e",
     "test:unit": "turbo run test:unit",
@@ -24,9 +25,5 @@
     "@types/node": "^20.12.7",
     "turbo": "^1.12.3",
     "typescript": "^5.4.5"
-  },
-  "scripts": {
-    "stack:dev": "node scripts/dev-stack.mjs",
-    "stack:dev:web": "node scripts/dev-stack.mjs --with-web"
   }
 }
