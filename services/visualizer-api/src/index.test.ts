@@ -28,6 +28,7 @@ describe('applyEventToState', () => {
     mockedAxios.get.mockReset();
     mockedAxios.put.mockReset();
     __testing.resetLogBuffer();
+    __testing.setActiveScenarioName('retailer-happy-path');
   });
 
   it('creates a new trace when none exists', async () => {
@@ -103,6 +104,25 @@ describe('applyEventToState', () => {
       eventName: 'PaymentSettled',
       occurredAt,
     });
+  });
+
+  it('uses the active scenario namespace when persisting state', async () => {
+    __testing.setActiveScenarioName('custom-scenario');
+
+    mockedAxios.get.mockResolvedValueOnce({ status: 404 });
+    mockedAxios.put.mockResolvedValueOnce({ status: 204 });
+
+    await applyEventToState({
+      traceId: 'trace-123',
+      domain: 'orders',
+      eventName: 'OrderPlaced',
+      occurredAt: '2024-01-01T00:00:00.000Z',
+    });
+
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      'http://localhost:3200/kv/custom-scenario/trace%3Atrace-123',
+      expect.any(Object),
+    );
   });
 });
 

@@ -17,3 +17,11 @@ export type LogEntry = {
   eventName: string;
   occurredAt: string;
 };
+
+export type ScenarioResponse = {
+  name: string;
+};
+
+export type ScenariosResponse = {
+  items: string[];
+};

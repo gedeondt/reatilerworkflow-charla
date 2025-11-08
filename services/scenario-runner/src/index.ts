@@ -1,6 +1,8 @@
 import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
+import { request as httpRequest, type RequestOptions } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 
 import Fastify from 'fastify';
 import type { FastifyReply } from 'fastify';
@@ -17,12 +19,122 @@ import { createHttpEventBus } from '@reatiler/shared';
 import { env } from './env.js';
 
 const BUSINESS_DIR = 'business';
+const SCENARIO_POLL_INTERVAL_MS = 2000;
 
 const app = Fastify({ logger: true });
 
 let currentScenarioName: string | null = null;
 let currentScenario: Scenario | null = null;
 let currentRuntime: ScenarioRuntime | null = null;
+let scenarioSyncStopped = false;
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+type HttpJsonResult<T> = { status: number; body: T };
+
+async function httpJson<T>(
+  url: string,
+  options: { method?: string; body?: unknown } = {},
+): Promise<HttpJsonResult<T>> {
+  const parsed = new URL(url);
+  const isHttps = parsed.protocol === 'https:';
+  const requestFn = isHttps ? httpsRequest : httpRequest;
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  };
+
+  let payload: string | undefined;
+
+  if (options.body !== undefined) {
+    payload = JSON.stringify(options.body);
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const requestOptions: RequestOptions = {
+    method: options.method ?? 'GET',
+    hostname: parsed.hostname,
+    port: parsed.port ? Number(parsed.port) : undefined,
+    path: `${parsed.pathname}${parsed.search}` || '/',
+    headers,
+  };
+
+  return new Promise((resolve, reject) => {
+    const req = requestFn(requestOptions, (res) => {
+      const chunks: Buffer[] = [];
+
+      res.on('data', (chunk) => {
+        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      });
+
+      res.on('end', () => {
+        const status = res.statusCode ?? 0;
+        const text = Buffer.concat(chunks).toString('utf-8');
+
+        let parsedBody: unknown = null;
+
+        if (text.length > 0) {
+          try {
+            parsedBody = JSON.parse(text) as T;
+          } catch (error) {
+            const parseError = new Error(
+              `Failed to parse JSON response from ${url}`,
+            );
+            (parseError as { cause?: unknown }).cause = error;
+            return reject(parseError);
+          }
+        }
+
+        if (status < 200 || status >= 300) {
+          const error = new Error(
+            `Request to ${url} failed with status ${status}`,
+          );
+          (error as { status?: number }).status = status;
+          (error as { body?: string }).body = text;
+          return reject(error);
+        }
+
+        resolve({ status, body: parsedBody as T });
+      });
+    });
+
+    req.on('error', reject);
+
+    if (payload) {
+      req.setHeader('Content-Length', Buffer.byteLength(payload));
+      req.write(payload);
+    }
+
+    req.end();
+  });
+}
+
+const extractErrorMessage = (error: unknown): string => {
+  if (error && typeof error === 'object' && 'body' in error) {
+    const body = (error as { body?: string }).body;
+
+    if (typeof body === 'string' && body.length > 0) {
+      try {
+        const parsed = JSON.parse(body) as { error?: unknown };
+
+        if (parsed && typeof parsed.error === 'string') {
+          return parsed.error;
+        }
+      } catch {
+        return body;
+      }
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+};
 
 function findBusinessDirectory(startDir: string): string | null {
   let current: string | null = startDir;
@@ -58,6 +170,34 @@ async function listScenarioNames(): Promise<string[]> {
   return entries
     .filter((entry) => entry.isFile() && extname(entry.name) === '.json')
     .map((entry) => entry.name.replace(/\.json$/u, ''));
+}
+
+async function fetchVisualizerScenarioName(): Promise<string | null> {
+  try {
+    const { body } = await httpJson<{ name?: string }>(
+      `${env.VISUALIZER_API_URL}/scenario`,
+    );
+
+    if (body && typeof body.name === 'string' && body.name.length > 0) {
+      return body.name;
+    }
+
+    app.log.warn(
+      { response: body },
+      'visualizer-api returned an invalid scenario payload',
+    );
+  } catch (error) {
+    app.log.warn({ err: error }, 'failed to fetch active scenario from visualizer-api');
+  }
+
+  return null;
+}
+
+async function requestScenarioChange(name: string): Promise<void> {
+  await httpJson(`${env.VISUALIZER_API_URL}/scenario`, {
+    method: 'POST',
+    body: { name },
+  });
 }
 
 async function stopRuntime(): Promise<void> {
@@ -116,6 +256,25 @@ async function startRuntime(name: string): Promise<void> {
   app.log.info({ scenario: name }, 'scenario runtime started');
 }
 
+async function syncScenarioWithVisualizer(): Promise<void> {
+  while (!scenarioSyncStopped) {
+    const remoteScenario = await fetchVisualizerScenarioName();
+
+    if (remoteScenario && remoteScenario !== currentScenarioName) {
+      try {
+        await startRuntime(remoteScenario);
+      } catch (error) {
+        app.log.error(
+          { err: error, scenario: remoteScenario },
+          'failed to synchronize scenario runtime with visualizer-api',
+        );
+      }
+    }
+
+    await delay(SCENARIO_POLL_INTERVAL_MS);
+  }
+}
+
 function ensureScenarioResponse(reply: FastifyReply) {
   if (!currentScenario || !currentScenarioName) {
     void reply.status(503).send({ error: 'No scenario is currently running.' });
@@ -172,17 +331,24 @@ app.post('/scenario', async (req, reply) => {
   }
 
   try {
-    await stopRuntime();
+    await requestScenarioChange(name);
   } catch (error) {
-    app.log.error({ err: error }, 'failed to stop previous scenario runtime');
-    return reply.status(500).send({ error: 'Unable to stop current scenario runtime.' });
+    const status = (error as { status?: number }).status;
+    const statusCode =
+      typeof status === 'number' && status >= 400 && status < 500 ? status : 502;
+    const message = extractErrorMessage(error);
+    app.log.error({ err: error }, 'failed to update scenario in visualizer-api');
+    return reply.status(statusCode).send({ error: message });
   }
 
   try {
     await startRuntime(name);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    app.log.error({ err: error }, 'failed to start new scenario runtime');
+    app.log.error(
+      { err: error, scenario: name },
+      'failed to start scenario runtime after switching via visualizer-api',
+    );
     return reply.status(500).send({ error: message });
   }
 
@@ -201,10 +367,25 @@ let shuttingDown = false;
 
 async function start() {
   try {
-    await startRuntime(env.SCENARIO_NAME);
+    scenarioSyncStopped = false;
+    const remoteScenario = await fetchVisualizerScenarioName();
+    const initialScenario = remoteScenario ?? env.SCENARIO_NAME;
+
+    if (remoteScenario) {
+      app.log.info(
+        { scenario: remoteScenario },
+        'using scenario from visualizer-api as initial runtime',
+      );
+    }
+
+    await startRuntime(initialScenario);
 
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
     app.log.info({ port: env.PORT }, 'scenario-runner listening');
+
+    void syncScenarioWithVisualizer().catch((error) => {
+      app.log.error({ err: error }, 'scenario synchronization loop crashed');
+    });
   } catch (error) {
     app.log.error({ err: error }, 'failed to start scenario-runner');
 
@@ -225,6 +406,7 @@ async function shutdown(signal: NodeJS.Signals) {
 
   shuttingDown = true;
   app.log.info({ signal }, 'shutting down scenario-runner');
+  scenarioSyncStopped = true;
 
   try {
     await stopRuntime();

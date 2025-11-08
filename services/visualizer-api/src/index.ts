@@ -1,3 +1,7 @@
+import { existsSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
+import { dirname, extname, join } from 'node:path';
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
@@ -44,7 +48,7 @@ type LogEntry = {
 
 const QUEUE_BASE = process.env.QUEUE_BASE ?? 'http://localhost:3005';
 const KV_BASE = process.env.KV_BASE ?? 'http://localhost:3200';
-const SCENARIO_NAME = process.env.SCENARIO_NAME ?? 'retailer-happy-path';
+const DEFAULT_SCENARIO = process.env.SCENARIO_NAME ?? 'retailer-happy-path';
 const PORT = Number(process.env.PORT) || 3300;
 
 const VISUALIZER_QUEUE = 'visualizer';
@@ -52,7 +56,26 @@ const EMPTY_DELAY_MS = 200;
 const ERROR_DELAY_MS = 1000;
 const LOG_BUFFER_SIZE = 200;
 
+const BUSINESS_DIR_NAME = 'business';
+
 const logBuffer: LogEntry[] = [];
+
+const resetLogBuffer = () => {
+  logBuffer.splice(0, logBuffer.length);
+};
+
+let activeScenarioName = DEFAULT_SCENARIO;
+
+const getActiveScenarioName = (): string => activeScenarioName;
+
+const setActiveScenarioName = (name: string): void => {
+  if (activeScenarioName === name) {
+    return;
+  }
+
+  activeScenarioName = name;
+  resetLogBuffer();
+};
 
 const appendLogEntry = (entry: LogEntry) => {
   logBuffer.push(entry);
@@ -76,13 +99,94 @@ const namespaceUrl = (namespace: string) =>
 const recordUrl = (namespace: string, key: string) =>
   `${namespaceUrl(namespace)}/${encodeURIComponent(key)}`;
 
+const findBusinessDirectory = (startDir: string): string | null => {
+  let current: string | null = startDir;
+
+  while (current) {
+    const candidate = join(current, BUSINESS_DIR_NAME);
+
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+
+    const parent = dirname(current);
+
+    if (parent === current) {
+      break;
+    }
+
+    current = parent;
+  }
+
+  return null;
+};
+
+const listScenarioNames = async (): Promise<string[]> => {
+  const businessDir = findBusinessDirectory(process.cwd());
+
+  if (!businessDir) {
+    return [];
+  }
+
+  const entries = await readdir(businessDir, { withFileTypes: true });
+
+  return entries
+    .filter((entry) => entry.isFile() && extname(entry.name) === '.json')
+    .map((entry) => entry.name.replace(/\.json$/u, ''))
+    .sort();
+};
+
 await app.register(cors, { origin: true });
 
 app.get('/health', async () => ({ ok: true }));
 
+app.get('/scenario', async (_request, reply) => {
+  return reply.send({ name: getActiveScenarioName() });
+});
+
+app.get('/scenarios', async (_request, reply) => {
+  try {
+    const names = await listScenarioNames();
+    return reply.send({ items: names });
+  } catch (error) {
+    app.log.error({ err: error }, 'failed to list scenarios');
+    return reply.status(500).send({ error: 'Unable to list scenarios.' });
+  }
+});
+
+app.post<{ Body: { name?: unknown } }>('/scenario', async (request, reply) => {
+  const { name } = request.body ?? {};
+
+  if (typeof name !== 'string' || name.length === 0) {
+    return reply
+      .status(400)
+      .send({ error: 'Request body must include a scenario name.' });
+  }
+
+  let available: string[] = [];
+
+  try {
+    available = await listScenarioNames();
+  } catch (error) {
+    app.log.error({ err: error }, 'failed to list scenarios before switch');
+    return reply
+      .status(500)
+      .send({ error: 'Unable to validate requested scenario.' });
+  }
+
+  if (!available.includes(name)) {
+    return reply.status(400).send({ error: `Unknown scenario "${name}".` });
+  }
+
+  setActiveScenarioName(name);
+
+  return reply.send({ name });
+});
+
 app.get('/traces', async (_request, reply) => {
   try {
-    const response = await axios.get(namespaceUrl(SCENARIO_NAME), {
+    const namespace = getActiveScenarioName();
+    const response = await axios.get(namespaceUrl(namespace), {
       validateStatus: (status) => status === 404 || (status >= 200 && status < 300),
     });
 
@@ -205,7 +309,8 @@ export const applyEventToState = async (event: NormalizedVisualizerEvent): Promi
   const { traceId, domain, eventName, occurredAt } = event;
 
   const key = `trace:${traceId}`;
-  const url = recordUrl(SCENARIO_NAME, key);
+  const namespace = getActiveScenarioName();
+  const url = recordUrl(namespace, key);
 
   let current: TraceView | null = null;
 
@@ -290,14 +395,14 @@ if (process.env.NODE_ENV !== 'test') {
     });
 }
 
-const resetLogBuffer = () => {
-  logBuffer.splice(0, logBuffer.length);
-};
-
 export const __testing = {
   normalizeVisualizerPayload,
   resetLogBuffer,
   getLogEntries,
+  getActiveScenarioName,
+  setActiveScenarioName: (name: string) => {
+    activeScenarioName = name;
+  },
 };
 
 export { app, consumeLoop };
