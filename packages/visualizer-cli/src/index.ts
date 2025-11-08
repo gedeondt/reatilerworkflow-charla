@@ -67,7 +67,7 @@ let globalMaxTraces = cliOptions.maxTraces;
 
 let runtimeResources: RuntimeResources | null = null;
 let shutdownRegistered = false;
-let switchingScenario = false;
+let isSwitching = false;
 let connectionErrorLogged = false;
 let seenEvents = new Set<string>();
 let unknownQueuesLogged = new Set<string>();
@@ -280,7 +280,7 @@ function startPolling(onEvent: OnEvent): () => void {
   let stopped = false;
 
   const poll = async () => {
-    if (stopped) {
+    if (stopped || isSwitching) {
       return;
     }
 
@@ -408,41 +408,86 @@ async function getAvailableScenarios(): Promise<ScenarioSummary[]> {
 
 async function promptScenarioSelection(
   scenarios: ScenarioSummary[],
-  currentName: string | null
-): Promise<string> {
-  console.log('Escenarios disponibles:');
+  currentName: string | null,
+  options: {
+    allowCancel?: boolean;
+    screen?: Renderer['screen'];
+    onCancel?: () => void;
+    onInvalid?: () => void;
+  } = {}
+): Promise<string | null> {
+  const { allowCancel = false, screen, onCancel, onInvalid } = options;
 
-  scenarios.forEach((scenario, index) => {
-    const marker = currentName && scenario.name === currentName ? ' (actual)' : '';
-    console.log(`[${index + 1}] ${scenario.name} (${scenario.domainsCount} dominios)${marker}`);
-  });
+  let resumeProgram: (() => void) | undefined;
+
+  if (screen) {
+    resumeProgram = screen.program.pause() as () => void;
+  }
 
   const rl = createInterface({ input, output });
 
-  while (true) {
-    const answer = await rl.question('Selecciona escenario: ');
-    const trimmed = answer.trim();
+  try {
+    console.log('Escenarios disponibles:');
 
-    if (trimmed.length === 0) {
-      console.log('Ingresa el número o el nombre del escenario.');
-      continue;
+    scenarios.forEach((scenario, index) => {
+      const marker = currentName && scenario.name === currentName ? ' (actual)' : '';
+      console.log(`[${index + 1}] ${scenario.name}${marker}`);
+    });
+
+    const promptLabel = allowCancel
+      ? 'Selecciona escenario (Enter para cancelar): '
+      : 'Selecciona escenario: ';
+
+    while (true) {
+      const answer = await rl.question(promptLabel);
+      const trimmed = answer.trim();
+
+      if (trimmed.length === 0) {
+        if (allowCancel) {
+          onCancel?.();
+          return null;
+        }
+
+        console.log('Ingresa el número o el nombre del escenario.');
+        continue;
+      }
+
+      const parsedIndex = Number.parseInt(trimmed, 10);
+
+      if (!Number.isNaN(parsedIndex)) {
+        if (parsedIndex >= 1 && parsedIndex <= scenarios.length) {
+          return scenarios[parsedIndex - 1].name;
+        }
+
+        if (allowCancel) {
+          console.log('Selección inválida. Se mantiene el escenario actual.');
+          onInvalid?.();
+          return null;
+        }
+      }
+
+      if (!allowCancel) {
+        const match = scenarios.find((scenario) => scenario.name === trimmed);
+
+        if (match) {
+          return match.name;
+        }
+
+        console.log('Selección inválida. Intenta nuevamente.');
+        continue;
+      }
+
+      console.log('Selección inválida. Se mantiene el escenario actual.');
+      onInvalid?.();
+      return null;
     }
+  } finally {
+    rl.close();
 
-    const parsedIndex = Number.parseInt(trimmed, 10);
-
-    if (!Number.isNaN(parsedIndex) && parsedIndex >= 1 && parsedIndex <= scenarios.length) {
-      rl.close();
-      return scenarios[parsedIndex - 1].name;
+    if (resumeProgram) {
+      resumeProgram();
+      screen?.render();
     }
-
-    const match = scenarios.find((scenario) => scenario.name === trimmed);
-
-    if (match) {
-      rl.close();
-      return match.name;
-    }
-
-    console.log('Selección inválida. Intenta nuevamente.');
   }
 }
 
@@ -452,18 +497,18 @@ async function resetMessageQueues(): Promise<boolean> {
   try {
     response = await fetch(new URL('/admin/reset', messageQueueUrl), { method: 'POST' });
   } catch (error) {
-    console.warn(
-      `⚠️  No se pudo conectar a la cola de mensajes (${messageQueueUrl}) para reiniciar: ${String(
-        error
-      )}`
-    );
+    const message = `⚠️  No se pudo conectar a la cola de mensajes (${messageQueueUrl}) para reiniciar: ${String(
+      error
+    )}`;
+    console.warn(message);
+    pushStatusMessage?.(message, 'warning');
     return false;
   }
 
   if (!response.ok) {
-    console.warn(
-      `⚠️  Reinicio de colas respondido con ${response.status} ${response.statusText}. Continuando sin reiniciar.`
-    );
+    const message = `⚠️  Reinicio de colas respondido con ${response.status} ${response.statusText}. Continuando sin reiniciar.`;
+    console.warn(message);
+    pushStatusMessage?.(message, 'warning');
     return false;
   }
 
@@ -620,7 +665,7 @@ function registerShutdownHandler(): void {
   });
 }
 
-async function activateScenario(name: string): Promise<void> {
+async function activateScenario(name: string, infoOverride?: ScenarioInfoResponse): Promise<void> {
   let scenario: Scenario;
 
   try {
@@ -629,7 +674,7 @@ async function activateScenario(name: string): Promise<void> {
     throw new Error(`Unable to load scenario "${name}": ${String(error)}`);
   }
 
-  const info = await switchScenario(name);
+  const info = infoOverride ?? (await switchScenario(name));
   const domains = mergeDomainDefinitions(scenario, info);
   const context = createScenarioContext(scenario, domains);
 
@@ -650,6 +695,10 @@ async function activateScenario(name: string): Promise<void> {
   pushStatusMessage?.('Pulsa "s" para cambiar de escenario.', 'info');
 
   const refreshExecutions = () => {
+    if (isSwitching) {
+      return;
+    }
+
     renderer.renderExecutions(getExecutionRows(domains, globalMaxTraces, Date.now()));
   };
 
@@ -657,6 +706,10 @@ async function activateScenario(name: string): Promise<void> {
   const refreshTimer = setInterval(refreshExecutions, REFRESH_INTERVAL_MS);
 
   const stopPolling = startPolling((envelope, { queue }) => {
+    if (isSwitching) {
+      return;
+    }
+
     const correlationId = envelope.correlationId?.trim() ?? null;
 
     if (configuredFilterCorrelationId && correlationId !== configuredFilterCorrelationId) {
@@ -721,44 +774,115 @@ async function activateScenario(name: string): Promise<void> {
   registerShutdownHandler();
 
   renderer.screen.key(['C-c', 'q'], shutdown);
-  renderer.screen.key(['s'], () => {
+  renderer.screen.key(['s', 'S'], () => {
     void handleScenarioSwitch();
   });
 }
 
 async function handleScenarioSwitch(): Promise<void> {
-  if (switchingScenario) {
+  if (isSwitching) {
     return;
   }
 
-  switchingScenario = true;
-  const previousScenario = runtimeResources?.context.scenario.name ?? null;
+  if (!runtimeResources) {
+    return;
+  }
+
+  isSwitching = true;
+  const previousScenarioName = runtimeResources.context.scenario.name;
 
   try {
-    cleanupResources();
+    let scenarios: ScenarioSummary[];
 
-    const scenarios = await getAvailableScenarios();
+    try {
+      scenarios = await fetchScenarioSummariesFromRunner();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
+      console.error(`❌ ${message}`);
+      pushStatusMessage?.(`❌ ${message}`, 'error');
+      return;
+    }
 
     if (scenarios.length === 0) {
-      console.error('❌ No hay escenarios disponibles.');
-      process.exit(1);
+      const message =
+        'No se pudo cambiar de escenario: el scenario-runner no expuso escenarios. Se mantiene el escenario actual.';
+      console.error(`❌ ${message}`);
+      pushStatusMessage?.(`❌ ${message}`, 'error');
+      return;
     }
 
-    let nextScenario: string;
+    let wasInvalid = false;
 
-    if (scenarios.length === 1) {
-      nextScenario = scenarios[0].name;
-      console.log(`Escenario único disponible: ${nextScenario}`);
-    } else {
-      nextScenario = await promptScenarioSelection(scenarios, previousScenario);
+    const selectedScenario = await promptScenarioSelection(scenarios, previousScenarioName, {
+      allowCancel: true,
+      screen: runtimeResources.renderer.screen,
+      onInvalid: () => {
+        wasInvalid = true;
+      }
+    });
+
+    if (!selectedScenario) {
+      if (wasInvalid) {
+        pushStatusMessage?.('Selección inválida. Se mantiene el escenario actual.', 'warning');
+      } else {
+        pushStatusMessage?.('Cambio de escenario cancelado.', 'info');
+      }
+      return;
     }
 
-    await activateScenario(nextScenario);
+    if (selectedScenario === previousScenarioName) {
+      pushStatusMessage?.(`El escenario "${selectedScenario}" ya está activo.`, 'info');
+      return;
+    }
+
+    try {
+      loadScenario(selectedScenario);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
+      console.error(`❌ ${message}`);
+      pushStatusMessage?.(`❌ ${message}`, 'error');
+      return;
+    }
+
+    pushStatusMessage?.('Cambiando de escenario...', 'info');
+
+    let info: ScenarioInfoResponse;
+
+    try {
+      info = await switchScenario(selectedScenario);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
+      console.error(`❌ ${message}`);
+      pushStatusMessage?.(`❌ ${message}`, 'error');
+      return;
+    }
+
+    cleanupResources();
+
+    await activateScenario(selectedScenario, info);
   } catch (error) {
-    console.error(`❌ Error al cambiar de escenario: ${String(error)}`);
-    process.exit(1);
+    const detail = error instanceof Error ? error.message : String(error);
+    const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
+    console.error(`❌ ${message}`);
+
+    if (!runtimeResources) {
+      try {
+        await activateScenario(previousScenarioName);
+      } catch (recoveryError) {
+        const recoveryDetail = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+        console.error(
+          `❌ Falló la restauración del escenario anterior "${previousScenarioName}": ${recoveryDetail}`
+        );
+      }
+    }
+
+    pushStatusMessage?.(`❌ ${message}`, 'error');
   } finally {
-    switchingScenario = false;
+    isSwitching = false;
+    runtimeResources?.renderer.screen.render();
   }
 }
 
@@ -782,6 +906,10 @@ async function main() {
       console.log(`Escenario único disponible: ${selectedScenario}`);
     } else {
       selectedScenario = await promptScenarioSelection(scenarios, envScenarioName ?? null);
+    }
+
+    if (!selectedScenario) {
+      throw new Error('No scenario selected.');
     }
 
     await activateScenario(selectedScenario);
