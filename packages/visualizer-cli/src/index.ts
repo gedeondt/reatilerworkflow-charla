@@ -35,6 +35,7 @@ type OnEvent = (envelope: EventEnvelope, context: { queue: string }) => void;
 type MirroredMessage = { queue: string; message: unknown };
 type ScenarioSummary = { name: string; domainsCount: number };
 type ScenarioInfoResponse = { name: string; domains: Domain[] };
+type VisualizerState = { scenarioName: string; domains: Domain[] };
 type ScenarioContext = {
   scenario: Scenario;
   domains: Domain[];
@@ -67,12 +68,29 @@ let globalMaxTraces = cliOptions.maxTraces;
 
 let runtimeResources: RuntimeResources | null = null;
 let shutdownRegistered = false;
+let isRunning = true;
 let isSwitching = false;
 let connectionErrorLogged = false;
 let seenEvents = new Set<string>();
 let unknownQueuesLogged = new Set<string>();
 let unknownEventsLogged = new Set<string>();
 let pushStatusMessage: ((message: string, level: LogLevel) => void) | undefined;
+
+function renderLayout(state: VisualizerState): void {
+  if (!runtimeResources) {
+    return;
+  }
+
+  console.clear();
+  runtimeResources.renderer.renderExecutions(
+    getExecutionRows(state.domains, globalMaxTraces, Date.now())
+  );
+  runtimeResources.renderer.screen.render();
+}
+
+function renderSystemMessage(message: string, level: LogLevel = 'info'): void {
+  pushStatusMessage?.(message, level);
+}
 
 function parseCliOptions(argv: string[]): CliOptions {
   let maxTraces = DEFAULT_MAX_TRACES;
@@ -191,7 +209,7 @@ function logConnectionError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   connectionErrorLogged = true;
 
-  pushStatusMessage?.(`⚠️  Unable to reach message queue at ${messageQueueUrl}: ${message}`, 'warning');
+  renderSystemMessage(`⚠️  Unable to reach message queue at ${messageQueueUrl}: ${message}`, 'warning');
 }
 
 function logConnectionRecovered() {
@@ -200,7 +218,7 @@ function logConnectionRecovered() {
   }
 
   connectionErrorLogged = false;
-  pushStatusMessage?.('✅ Connection to message queue restored.', 'info');
+  renderSystemMessage('✅ Connection to message queue restored.', 'info');
 }
 
 async function pollVisualizerQueue(onEvent: OnEvent): Promise<void> {
@@ -258,7 +276,7 @@ async function pollVisualizerQueue(onEvent: OnEvent): Promise<void> {
   const parsedEnvelope = eventEnvelopeSchema.safeParse(envelopeCandidate);
 
   if (!parsedEnvelope.success) {
-    pushStatusMessage?.(
+    renderSystemMessage(
       `⚠️  Received malformed event from queue "${queue}": ${parsedEnvelope.error.message}`,
       'warning'
     );
@@ -280,21 +298,21 @@ function startPolling(onEvent: OnEvent): () => void {
   let stopped = false;
 
   const poll = async () => {
-    if (stopped || isSwitching) {
+    if (stopped || !isRunning || isSwitching) {
       return;
     }
 
     try {
       await pollVisualizerQueue(onEvent);
     } catch (error) {
-      pushStatusMessage?.(`❌ Unexpected error while polling: ${String(error)}`, 'error');
+      renderSystemMessage(`❌ Unexpected error while polling: ${String(error)}`, 'error');
     }
   };
 
   void poll();
 
   const timer = setInterval(async () => {
-    if (isPolling || stopped) {
+    if (isPolling || stopped || !isRunning) {
       return;
     }
 
@@ -501,14 +519,14 @@ async function resetMessageQueues(): Promise<boolean> {
       error
     )}`;
     console.warn(message);
-    pushStatusMessage?.(message, 'warning');
+    renderSystemMessage(message, 'warning');
     return false;
   }
 
   if (!response.ok) {
     const message = `⚠️  Reinicio de colas respondido con ${response.status} ${response.statusText}. Continuando sin reiniciar.`;
     console.warn(message);
-    pushStatusMessage?.(message, 'warning');
+    renderSystemMessage(message, 'warning');
     return false;
   }
 
@@ -685,17 +703,17 @@ async function activateScenario(name: string, infoOverride?: ScenarioInfoRespons
   pushStatusMessage = renderer.pushStatusMessage;
 
   if (configuredFilterCorrelationId) {
-    pushStatusMessage?.(
+    renderSystemMessage(
       `🎯 Filtro activo. Mostrando correlationId=${configuredFilterCorrelationId}.`,
       'info'
     );
   }
 
-  pushStatusMessage?.(`✅ Escenario activo: ${scenario.name}.`, 'info');
-  pushStatusMessage?.('Pulsa "s" para cambiar de escenario.', 'info');
+  renderSystemMessage(`✅ Escenario activo: ${scenario.name}.`, 'info');
+  renderSystemMessage('Pulsa "s" para cambiar de escenario.', 'info');
 
   const refreshExecutions = () => {
-    if (isSwitching) {
+    if (!isRunning || isSwitching) {
       return;
     }
 
@@ -757,12 +775,12 @@ async function activateScenario(name: string, infoOverride?: ScenarioInfoRespons
 
     if (!queueDomainId && !unknownQueuesLogged.has(queue)) {
       unknownQueuesLogged.add(queue);
-      pushStatusMessage?.(`⚠️  Unknown queue "${queue}" for current scenario.`, 'warning');
+      renderSystemMessage(`⚠️  Unknown queue "${queue}" for current scenario.`, 'warning');
     }
 
     if (!context.eventNames.has(envelope.eventName) && !unknownEventsLogged.has(envelope.eventName)) {
       unknownEventsLogged.add(envelope.eventName);
-      pushStatusMessage?.(
+      renderSystemMessage(
         `⚠️  Unknown event "${envelope.eventName}" for scenario "${context.scenario.name}".`,
         'warning'
       );
@@ -775,114 +793,273 @@ async function activateScenario(name: string, infoOverride?: ScenarioInfoRespons
 
   renderer.screen.key(['C-c', 'q'], shutdown);
   renderer.screen.key(['s', 'S'], () => {
-    void handleScenarioSwitch();
+    void switchScenarioInteractive();
   });
+
+  isRunning = true;
+  renderLayout({ scenarioName: scenario.name, domains });
 }
 
-async function handleScenarioSwitch(): Promise<void> {
-  if (isSwitching) {
-    return;
+function cloneScenarioInfo({ name, domains }: ScenarioInfoResponse): ScenarioInfoResponse {
+  return { name, domains: domains.map((domain) => ({ id: domain.id, queue: domain.queue })) };
+}
+
+function resetStateWithScenario(payload: ScenarioInfoPayload): ScenarioInfoResponse {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Respuesta inválida del scenario-runner.');
   }
 
-  if (!runtimeResources) {
+  if (typeof payload.name !== 'string' || payload.name.length === 0) {
+    throw new Error('La respuesta del escenario no incluye nombre.');
+  }
+
+  if (!Array.isArray(payload.domains) || payload.domains.length === 0) {
+    throw new Error('La respuesta del escenario no incluye dominios.');
+  }
+
+  const domains: Domain[] = [];
+
+  for (const candidate of payload.domains) {
+    if (!candidate || typeof candidate.id !== 'string' || typeof candidate.queue !== 'string') {
+      continue;
+    }
+
+    domains.push({ id: candidate.id, queue: candidate.queue });
+  }
+
+  if (domains.length === 0) {
+    throw new Error('La respuesta del escenario no incluye dominios válidos.');
+  }
+
+  resetExecutions();
+  resetTracking();
+
+  return { name: payload.name, domains };
+}
+
+async function readLineOnce(): Promise<string> {
+  const rl = createInterface({ input, output });
+
+  try {
+    return await rl.question('');
+  } finally {
+    rl.close();
+  }
+}
+
+async function readNumberOrEmpty(): Promise<number | null> {
+  const line = (await readLineOnce()).trim();
+
+  if (line === '') {
+    return null;
+  }
+
+  const parsed = Number.parseInt(line, 10);
+
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    return -1;
+  }
+
+  return parsed - 1;
+}
+
+async function waitForEnter(): Promise<void> {
+  await readLineOnce();
+}
+
+async function switchScenarioInteractive(): Promise<void> {
+  if (isSwitching || !runtimeResources) {
     return;
   }
 
   isSwitching = true;
-  const previousScenarioName = runtimeResources.context.scenario.name;
+  isRunning = false;
+
+  const previousContext = runtimeResources.context;
+  const previousScenarioInfo: ScenarioInfoResponse = {
+    name: previousContext.scenario.name,
+    domains: previousContext.domains.map((domain) => ({ id: domain.id, queue: domain.queue }))
+  };
+
+  const pendingMessages: Array<{ text: string; level: LogLevel }> = [];
+
+  cleanupResources();
+
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+  }
+  process.stdin.resume();
+
+  let scenarioToActivate: ScenarioInfoResponse | null = null;
+  let reapplyPreviousScenario = false;
 
   try {
-    let scenarios: ScenarioSummary[];
+    console.clear();
+    console.log('=== Cambiar de escenario ===');
+
+    let response: Response;
 
     try {
-      scenarios = await fetchScenarioSummariesFromRunner();
+      response = await fetch(new URL('/scenarios', scenarioRunnerUrl));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
-      console.error(`❌ ${message}`);
-      pushStatusMessage?.(`❌ ${message}`, 'error');
+      console.log(`No se pudo obtener /scenarios (${detail}). Pulsa Enter para volver.`);
+      await waitForEnter();
+      pendingMessages.push({ text: 'No se pudo obtener la lista de escenarios.', level: 'error' });
       return;
     }
 
-    if (scenarios.length === 0) {
-      const message =
-        'No se pudo cambiar de escenario: el scenario-runner no expuso escenarios. Se mantiene el escenario actual.';
-      console.error(`❌ ${message}`);
-      pushStatusMessage?.(`❌ ${message}`, 'error');
+    if (!response.ok) {
+      console.log(`No se pudo obtener /scenarios (${response.status}). Pulsa Enter para volver.`);
+      await waitForEnter();
+      pendingMessages.push({ text: 'No se pudo obtener la lista de escenarios.', level: 'error' });
       return;
     }
 
-    let wasInvalid = false;
+    let body: unknown;
 
-    const selectedScenario = await promptScenarioSelection(scenarios, previousScenarioName, {
-      allowCancel: true,
-      screen: runtimeResources.renderer.screen,
-      onInvalid: () => {
-        wasInvalid = true;
+    try {
+      body = await response.json();
+    } catch (error) {
+      console.log(`No se pudo interpretar /scenarios (${String(error)}). Pulsa Enter para volver.`);
+      await waitForEnter();
+      pendingMessages.push({ text: 'No se pudo interpretar la lista de escenarios.', level: 'error' });
+      return;
+    }
+
+    const rawScenarios = Array.isArray((body as ScenarioListPayload).scenarios)
+      ? (body as ScenarioListPayload).scenarios
+      : Array.isArray(body)
+        ? body
+        : [];
+
+    if (!Array.isArray(rawScenarios) || rawScenarios.length === 0) {
+      console.log('No hay escenarios disponibles. Pulsa Enter para volver.');
+      await waitForEnter();
+      pendingMessages.push({ text: 'No hay escenarios disponibles.', level: 'warning' });
+      return;
+    }
+
+    const scenarioNames: string[] = [];
+
+    rawScenarios.forEach((scenario) => {
+      const candidate =
+        typeof scenario === 'string'
+          ? scenario
+          : scenario && typeof scenario.name === 'string'
+            ? scenario.name
+            : null;
+
+      if (candidate && candidate.trim().length > 0) {
+        scenarioNames.push(candidate.trim());
       }
     });
 
-    if (!selectedScenario) {
-      if (wasInvalid) {
-        pushStatusMessage?.('Selección inválida. Se mantiene el escenario actual.', 'warning');
-      } else {
-        pushStatusMessage?.('Cambio de escenario cancelado.', 'info');
-      }
+    if (scenarioNames.length === 0) {
+      console.log('No hay escenarios disponibles. Pulsa Enter para volver.');
+      await waitForEnter();
+      pendingMessages.push({ text: 'No hay escenarios disponibles.', level: 'warning' });
       return;
     }
 
-    if (selectedScenario === previousScenarioName) {
-      pushStatusMessage?.(`El escenario "${selectedScenario}" ya está activo.`, 'info');
+    scenarioNames.forEach((name, index) => {
+      const marker = name === previousScenarioInfo.name ? ' (actual)' : '';
+      console.log(`[${index + 1}] ${name}${marker}`);
+    });
+
+    console.log('Selecciona escenario (Enter para cancelar):');
+
+    const selectedIndex = await readNumberOrEmpty();
+
+    if (selectedIndex === null) {
+      pendingMessages.push({ text: 'Cambio de escenario cancelado.', level: 'info' });
+      return;
+    }
+
+    if (selectedIndex < 0 || selectedIndex >= scenarioNames.length) {
+      console.log('Selección inválida. Pulsa Enter para volver.');
+      await waitForEnter();
+      pendingMessages.push({ text: 'Selección inválida. Se mantiene el escenario actual.', level: 'warning' });
+      return;
+    }
+
+    const scenarioName = scenarioNames[selectedIndex];
+
+    if (scenarioName === previousScenarioInfo.name) {
+      pendingMessages.push({ text: `El escenario "${scenarioName}" ya está activo.`, level: 'info' });
       return;
     }
 
     try {
-      loadScenario(selectedScenario);
+      await fetch(new URL('/admin/reset', messageQueueUrl), { method: 'POST' });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
-      console.error(`❌ ${message}`);
-      pushStatusMessage?.(`❌ ${message}`, 'error');
+      console.warn('No se pudo resetear colas:', detail);
+      pendingMessages.push({ text: `⚠️  No se pudo resetear colas: ${detail}`, level: 'warning' });
+    }
+
+    const switchResponse = await fetch(new URL('/scenario', scenarioRunnerUrl), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: scenarioName })
+    });
+
+    if (!switchResponse.ok) {
+      console.log(`No se pudo cambiar de escenario (${switchResponse.status}). Pulsa Enter para volver.`);
+      await waitForEnter();
+      pendingMessages.push({ text: `No se pudo cambiar al escenario "${scenarioName}".`, level: 'error' });
       return;
     }
 
-    pushStatusMessage?.('Cambiando de escenario...', 'info');
+    reapplyPreviousScenario = true;
 
-    let info: ScenarioInfoResponse;
+    const currentResponse = await fetch(new URL('/scenario', scenarioRunnerUrl));
 
-    try {
-      info = await switchScenario(selectedScenario);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
-      console.error(`❌ ${message}`);
-      pushStatusMessage?.(`❌ ${message}`, 'error');
+    if (!currentResponse.ok) {
+      console.log(`No se pudo obtener escenario activo (${currentResponse.status}). Pulsa Enter para volver.`);
+      await waitForEnter();
+      pendingMessages.push({ text: 'No se pudo obtener el escenario activo.', level: 'error' });
       return;
     }
 
-    cleanupResources();
+    const currentPayload = (await currentResponse.json()) as ScenarioInfoPayload;
+    const parsedInfo = resetStateWithScenario(currentPayload);
 
-    await activateScenario(selectedScenario, info);
+    scenarioToActivate = parsedInfo;
+    reapplyPreviousScenario = false;
+    pendingMessages.push({ text: `✅ Escenario activo: ${scenarioName}.`, level: 'info' });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    const message = `No se pudo cambiar de escenario: ${detail}. Se mantiene el escenario actual.`;
-    console.error(`❌ ${message}`);
+    console.log(`No se pudo cambiar de escenario: ${detail}. Pulsa Enter para volver.`);
+    await waitForEnter();
+    pendingMessages.push({ text: `No se pudo cambiar de escenario: ${detail}.`, level: 'error' });
+  } finally {
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
+    process.stdin.resume();
 
-    if (!runtimeResources) {
-      try {
-        await activateScenario(previousScenarioName);
-      } catch (recoveryError) {
-        const recoveryDetail = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
-        console.error(
-          `❌ Falló la restauración del escenario anterior "${previousScenarioName}": ${recoveryDetail}`
-        );
+    const targetScenario = scenarioToActivate ?? previousScenarioInfo;
+
+    try {
+      if (scenarioToActivate) {
+        await activateScenario(targetScenario.name, cloneScenarioInfo(targetScenario));
+      } else if (reapplyPreviousScenario) {
+        await activateScenario(targetScenario.name);
+      } else {
+        await activateScenario(targetScenario.name, cloneScenarioInfo(targetScenario));
       }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`❌ Falló la activación del escenario "${targetScenario.name}": ${detail}`);
     }
 
-    pushStatusMessage?.(`❌ ${message}`, 'error');
-  } finally {
+    for (const message of pendingMessages) {
+      renderSystemMessage(message.text, message.level);
+    }
+
+    isRunning = true;
     isSwitching = false;
-    runtimeResources?.renderer.screen.render();
   }
 }
 
