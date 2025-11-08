@@ -149,16 +149,38 @@ importers:
         specifier: ^1.4.0
         version: 1.6.1(@types/node@20.19.24)
 
+  services/state-store:
+    dependencies:
+      '@fastify/cors':
+        specifier: ^8.5.0
+        version: 8.5.0
+      fastify:
+        specifier: 4.29.1
+        version: 4.29.1
+    devDependencies:
+      '@types/node':
+        specifier: ^20.12.7
+        version: 20.19.24
+      tsx:
+        specifier: ^4.7.1
+        version: 4.20.6
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+      vitest:
+        specifier: ^1.4.0
+        version: 1.6.1(@types/node@20.19.24)
+
   services/visualizer-api:
     dependencies:
       '@fastify/cors':
-        specifier: ^10.0.0
-        version: 10.1.0
+        specifier: ^8.5.0
+        version: 8.5.0
       axios:
         specifier: ^1.7.0
         version: 1.13.2
       fastify:
-        specifier: ^4.29.1
+        specifier: 4.29.1
         version: 4.29.1
     devDependencies:
       '@types/node':
@@ -687,11 +709,11 @@ packages:
       fast-uri: 2.4.0
     dev: false
 
-  /@fastify/cors@10.1.0:
-    resolution: {integrity: sha512-MZyBCBJtII60CU9Xme/iE4aEy8G7QpzGR8zkdXZkDFt7ElEMachbE61tfhAG/bvSaULlqlf0huMT12T7iqEmdQ==}
+  /@fastify/cors@8.5.0:
+    resolution: {integrity: sha512-/oZ1QSb02XjP0IK1U0IXktEsw/dUBTxJOW7IpIeO8c/tNalw/KjoNSJv1Sf6eqoBPO+TDGkifq6ynFK3v68HFQ==}
     dependencies:
-      fastify-plugin: 5.1.0
-      mnemonist: 0.40.0
+      fastify-plugin: 4.5.1
+      mnemonist: 0.39.6
     dev: false
 
   /@fastify/error@3.4.1:
@@ -2289,8 +2311,8 @@ packages:
     resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
     dev: false
 
-  /fastify-plugin@5.1.0:
-    resolution: {integrity: sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw==}
+  /fastify-plugin@4.5.1:
+    resolution: {integrity: sha512-stRHYGeuqpEZTL1Ef0Ovr2ltazUT9g844X5z/zEBFLG8RYlpDiOCIG+ATvYEp+/zmc7sN29mcIMp8gvYplYPIQ==}
     dev: false
 
   /fastify@4.29.1:
@@ -3007,8 +3029,8 @@ packages:
       ufo: 1.6.1
     dev: true
 
-  /mnemonist@0.40.0:
-    resolution: {integrity: sha512-kdd8AFNig2AD5Rkih7EPCXhu/iMvwevQFX/uEiGhZyPZi7fHqOoF4V4kHLpCfysxXMgQ4B52kdPMCwARshKvEg==}
+  /mnemonist@0.39.6:
+    resolution: {integrity: sha512-A/0v5Z59y63US00cRSLiloEIw3t5G+MiKz4BhX21FI+YBJXBOGW0ohFxTxO08dsOYlzxo87T7vGfZKYp2bcAWA==}
     dependencies:
       obliterator: 2.0.5
     dev: false

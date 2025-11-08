@@ -12,12 +12,11 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p .",
     "start": "node dist/index.js",
-    "lint": "eslint . --ext .ts",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "fastify": "^4.29.1",
-    "@fastify/cors": "^10.0.0"
+    "fastify": "4.29.1",
+    "@fastify/cors": "^8.5.0"
   },
   "devDependencies": {
     "typescript": "^5.4.5",
