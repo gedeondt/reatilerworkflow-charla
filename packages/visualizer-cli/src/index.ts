@@ -446,12 +446,28 @@ async function promptScenarioSelection(
   }
 }
 
-async function resetMessageQueues(): Promise<void> {
-  const response = await fetch(new URL('/admin/reset', messageQueueUrl), { method: 'POST' });
+async function resetMessageQueues(): Promise<boolean> {
+  let response: Response;
+
+  try {
+    response = await fetch(new URL('/admin/reset', messageQueueUrl), { method: 'POST' });
+  } catch (error) {
+    console.warn(
+      `⚠️  No se pudo conectar a la cola de mensajes (${messageQueueUrl}) para reiniciar: ${String(
+        error
+      )}`
+    );
+    return false;
+  }
 
   if (!response.ok) {
-    throw new Error(`Unable to reset message queues: ${response.status} ${response.statusText}`);
+    console.warn(
+      `⚠️  Reinicio de colas respondido con ${response.status} ${response.statusText}. Continuando sin reiniciar.`
+    );
+    return false;
   }
+
+  return true;
 }
 
 async function postScenarioRequest(name: string): Promise<void> {
