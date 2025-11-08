@@ -1,0 +1,75 @@
+{
+  "name": "Corporate Onboarding Saga",
+  "version": 1,
+  "domains": [
+    { "id": "hr", "queue": "hr" },
+    { "id": "payroll", "queue": "payroll" },
+    { "id": "it", "queue": "it" },
+    { "id": "facilities", "queue": "facilities" },
+    { "id": "security", "queue": "security" }
+  ],
+  "events": [
+    { "name": "EmployeeHired" },
+    { "name": "EmployeeCreated" },
+    { "name": "PayrollAccountCreated" },
+    { "name": "ITAccountCreated" },
+    { "name": "FacilitiesReady" },
+    { "name": "EmployeeActivated" }
+  ],
+  "listeners": [
+    {
+      "id": "hr-on-EmployeeHired",
+      "delayMs": 50,
+      "on": { "event": "EmployeeHired" },
+      "actions": [
+        { "type": "set-state", "domain": "hr", "status": "HIRED" },
+        { "type": "emit", "event": "EmployeeCreated", "toDomain": "payroll" },
+        { "type": "emit", "event": "EmployeeCreated", "toDomain": "it" }
+      ]
+    },
+    {
+      "id": "payroll-on-EmployeeCreated",
+      "delayMs": 120,
+      "on": { "event": "EmployeeCreated" },
+      "actions": [
+        { "type": "set-state", "domain": "payroll", "status": "ACCOUNT_CREATED" },
+        { "type": "emit", "event": "PayrollAccountCreated", "toDomain": "hr" }
+      ]
+    },
+    {
+      "id": "it-on-EmployeeCreated",
+      "delayMs": 200,
+      "on": { "event": "EmployeeCreated" },
+      "actions": [
+        { "type": "set-state", "domain": "it", "status": "ACCOUNT_CREATED" },
+        { "type": "emit", "event": "ITAccountCreated", "toDomain": "facilities" }
+      ]
+    },
+    {
+      "id": "facilities-on-ITAccountCreated",
+      "delayMs": 200,
+      "on": { "event": "ITAccountCreated" },
+      "actions": [
+        { "type": "set-state", "domain": "facilities", "status": "READY" },
+        { "type": "emit", "event": "FacilitiesReady", "toDomain": "security" }
+      ]
+    },
+    {
+      "id": "security-on-FacilitiesReady",
+      "delayMs": 150,
+      "on": { "event": "FacilitiesReady" },
+      "actions": [
+        { "type": "set-state", "domain": "security", "status": "ACCESS_GRANTED" },
+        { "type": "emit", "event": "EmployeeActivated", "toDomain": "hr" }
+      ]
+    },
+    {
+      "id": "hr-on-EmployeeActivated",
+      "delayMs": 80,
+      "on": { "event": "EmployeeActivated" },
+      "actions": [
+        { "type": "set-state", "domain": "hr", "status": "ACTIVE" }
+      ]
+    }
+  ]
+}
