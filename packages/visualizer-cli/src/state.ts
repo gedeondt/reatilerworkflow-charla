@@ -25,6 +25,15 @@ type ExecutionRow = {
 const metadata = new Map<string, ExecutionMeta>();
 const correlationToExecutionKey = new Map<string, string>();
 
+export function resetExecutions(): void {
+  for (const key of Object.keys(executions)) {
+    delete executions[key];
+  }
+
+  metadata.clear();
+  correlationToExecutionKey.clear();
+}
+
 function initializeExecution(
   key: string,
   domains: ScenarioDomain[],

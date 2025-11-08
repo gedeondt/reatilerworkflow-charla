@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { eventEnvelopeSchema, type EventEnvelope } from '@reatiler/shared';
-import { push, pop } from './queue.js';
+import { push, pop, resetQueues } from './queue.js';
 
 type MirroredMessage = {
   queue: string;
@@ -48,5 +48,10 @@ export async function routes(app: FastifyInstance) {
       'message dequeued'
     );
     return { message: msg };
+  });
+
+  app.post('/admin/reset', async (_req, reply) => {
+    resetQueues();
+    return reply.status(204).send();
   });
 }

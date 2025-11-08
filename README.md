@@ -46,14 +46,33 @@ pnpm -F message-queue dev
 pnpm -F scenario-runner dev
 ```
 
-## Levantar todo con un escenario
+## Levantar stack de demo con escenarios
+
+### Opción 1: manual
+
+En tres terminales independientes:
+
+```bash
+pnpm -F message-queue dev
+pnpm -F scenario-runner dev
+pnpm -F @reatiler/visualizer-cli dev
+```
+
+Al arrancar, el visualizador pedirá elegir un escenario (según `business/*.json`).
+
+Cambiar de escenario desde el visualizador:
+
+- Llama a `POST /admin/reset` en `message-queue` para limpiar todas las colas.
+- Cambia el escenario activo con `POST /scenario` en `scenario-runner`.
+- Se redibuja automáticamente con las nuevas columnas/dominios.
+
+### Opción 2: stack:dev
+
+Si ya tienes configurado el script `stack:dev`:
 
 ```bash
 pnpm stack:dev retailer-happy-path
-    • Levanta message-queue, scenario-runner y el visualizador.
-    • Usa el escenario business/retailer-happy-path.json.
-    • Para futuros escenarios: añade business/<otro>.json válido y ejecuta:
-pnpm stack:dev <otro>
+# y luego sigue las instrucciones del visualizer para elegir o cambiar de escenario
 ```
 
 ### Logging
