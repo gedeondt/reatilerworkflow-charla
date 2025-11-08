@@ -10,3 +10,10 @@ export type TraceView = {
     };
   };
 };
+
+export type LogEntry = {
+  traceId: string;
+  domain: string;
+  eventName: string;
+  occurredAt: string;
+};

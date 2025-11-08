@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { applyEventToState, type TraceView } from './index.js';
+import { applyEventToState, type TraceView, __testing } from './index.js';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 vi.mock('axios', () => {
@@ -27,6 +27,7 @@ describe('applyEventToState', () => {
   beforeEach(() => {
     mockedAxios.get.mockReset();
     mockedAxios.put.mockReset();
+    __testing.resetLogBuffer();
   });
 
   it('creates a new trace when none exists', async () => {
@@ -86,7 +87,7 @@ describe('applyEventToState', () => {
 
     await applyEventToState({
       traceId: 'trace-1',
-      metadata: { domain: 'payments' },
+      domain: 'payments',
       eventName: 'PaymentSettled',
       occurredAt,
     });
@@ -102,5 +103,67 @@ describe('applyEventToState', () => {
       eventName: 'PaymentSettled',
       occurredAt,
     });
+  });
+});
+
+describe('normalizeVisualizerPayload', () => {
+  it('normalizes an enveloped queue message', () => {
+    const result = __testing.normalizeVisualizerPayload({
+      message: {
+        queue: 'orders',
+        message: {
+          traceId: 'trace-1',
+          eventName: 'OrderPlaced',
+          occurredAt: '2024-01-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      traceId: 'trace-1',
+      domain: 'orders',
+      eventName: 'OrderPlaced',
+      occurredAt: '2024-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('falls back to correlationId and UnknownEvent', () => {
+    const result = __testing.normalizeVisualizerPayload({
+      message: {
+        queue: 'payments',
+        message: {
+          correlationId: 'corr-123',
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      traceId: 'corr-123',
+      domain: 'payments',
+      eventName: 'UnknownEvent',
+      occurredAt: expect.any(String),
+    });
+  });
+
+  it('handles already normalized events without envelope', () => {
+    const result = __testing.normalizeVisualizerPayload({
+      eventName: 'StandaloneEvent',
+      traceId: 'standalone-trace',
+      occurredAt: '2024-02-02T00:00:00.000Z',
+      domain: 'standalone',
+    });
+
+    expect(result).toEqual({
+      traceId: 'standalone-trace',
+      domain: 'standalone',
+      eventName: 'StandaloneEvent',
+      occurredAt: '2024-02-02T00:00:00.000Z',
+    });
+  });
+
+  it('returns null for invalid payloads', () => {
+    expect(__testing.normalizeVisualizerPayload(null)).toBeNull();
+    expect(__testing.normalizeVisualizerPayload({ status: 'empty' })).toBeNull();
+    expect(__testing.normalizeVisualizerPayload({ message: null })).toBeNull();
   });
 });
