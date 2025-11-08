@@ -13,6 +13,7 @@ pnpm -F message-queue dev
 - `GET /health`
 - `POST /queues/:name/messages`
 - `POST /queues/:name/pop`
+- `POST /admin/reset` _(solo para demos/local; reinicia todas las colas, incluida la de visualizer)_
 
 ## Ejemplos
 

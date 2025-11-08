@@ -13,6 +13,10 @@ export function pop<T>(name: string): T | null {
   return msg;
 }
 
-export function _reset() {
+export function resetQueues(): void {
   queues.clear();
+}
+
+export function _reset() {
+  resetQueues();
 }
