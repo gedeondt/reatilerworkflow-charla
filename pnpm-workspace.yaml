@@ -1,8 +1,3 @@
 packages:
   - "packages/*"
-  - "packages/visualizer-cli"
-  - "services/message-queue"
-  - "services/scenario-runner"
-  - "services/state-store"
-  - "services/visualizer-api"
   - "services/*"

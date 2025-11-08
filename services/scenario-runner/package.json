@@ -1,11 +1,13 @@
 {
-  "name": "scenario-runner",
+  "name": "@reatiler/scenario-runner",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p .",
