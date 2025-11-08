@@ -1,31 +1,73 @@
 import { spawn } from 'node:child_process';
+import http from 'node:http';
+import https from 'node:https';
 import process from 'node:process';
+
+export const waitFor = async (
+  url,
+  { timeoutMs = 60_000, intervalMs = 1_000 } = {},
+) => {
+  const target = new URL(url);
+  const client = target.protocol === 'https:' ? https : http;
+  const deadline = Date.now() + timeoutMs;
+
+  return new Promise((resolve, reject) => {
+    let finished = false;
+
+    const ensureDone = (action) => {
+      if (finished) {
+        return true;
+      }
+      if (Date.now() > deadline) {
+        finished = true;
+        reject(new Error(`Timed out waiting for ${url} after ${timeoutMs}ms`));
+        return true;
+      }
+      if (action === 'resolve') {
+        finished = true;
+        resolve();
+        return true;
+      }
+      return false;
+    };
+
+    const scheduleNextAttempt = () => {
+      if (ensureDone()) {
+        return;
+      }
+      setTimeout(attempt, intervalMs);
+    };
+
+    const attempt = () => {
+      if (ensureDone()) {
+        return;
+      }
+
+      const request = client.get(target, (response) => {
+        const { statusCode = 0 } = response;
+        response.resume();
+
+        if (statusCode >= 200 && statusCode < 500) {
+          ensureDone('resolve');
+          return;
+        }
+
+        scheduleNextAttempt();
+      });
+
+      request.on('error', () => {
+        scheduleNextAttempt();
+      });
+    };
+
+    attempt();
+  });
+};
 
 const [, , scenarioArg] = process.argv;
 const scenarioName = scenarioArg ?? 'retailer-happy-path';
 
 console.log(`Starting stack with scenario "${scenarioName}".`);
-
-const childSpecs = [
-  {
-    name: 'message-queue',
-    command: 'pnpm',
-    args: ['-F', 'message-queue', 'dev'],
-    env: { ...process.env },
-  },
-  {
-    name: 'scenario-runner',
-    command: 'pnpm',
-    args: ['-F', 'scenario-runner', 'dev'],
-    env: { ...process.env, SCENARIO_NAME: scenarioName },
-  },
-  {
-    name: 'visualizer-cli',
-    command: 'pnpm',
-    args: ['-F', '@reatiler/visualizer-cli', 'dev'],
-    env: { ...process.env, SCENARIO_NAME: scenarioName },
-  },
-];
 
 const childProcesses = [];
 let shuttingDown = false;
@@ -53,29 +95,32 @@ const shutdown = ({ code = 0, signal } = {}) => {
   }, 100);
 };
 
-const registerChild = (spec) => {
-  const child = spawn(spec.command, spec.args, {
-    stdio: 'inherit',
-    env: spec.env,
-  });
-
-  childProcesses.push({ name: spec.name, child });
+const registerChild = (name, child) => {
+  childProcesses.push({ name, child });
 
   child.on('exit', (code, signal) => {
     if (shuttingDown) {
       return;
     }
 
+    if (name === 'visualizer-cli' && code && code !== 0) {
+      console.error(
+        `${name} exited with code ${code}. Terminating remaining services...`,
+      );
+      shutdown({ code });
+      return;
+    }
+
     if (code !== null) {
       if (code === 0) {
-        console.log(`${spec.name} exited with code 0. Shutting down stack.`);
+        console.log(`${name} exited with code 0. Shutting down stack.`);
         shutdown({ code: 0 });
       } else {
-        console.error(`${spec.name} exited with code ${code}. Shutting down stack.`);
+        console.error(`${name} exited with code ${code}. Shutting down stack.`);
         shutdown({ code });
       }
     } else if (signal) {
-      console.log(`${spec.name} exited due to signal ${signal}. Shutting down stack.`);
+      console.log(`${name} exited due to signal ${signal}. Shutting down stack.`);
       shutdown({ code: 0, signal });
     } else {
       shutdown({ code: 0 });
@@ -83,14 +128,67 @@ const registerChild = (spec) => {
   });
 
   child.on('error', (error) => {
-    console.error(`${spec.name} failed to start:`, error);
+    console.error(`${name} failed to start:`, error);
     shutdown({ code: 1 });
   });
 };
 
-for (const spec of childSpecs) {
-  registerChild(spec);
-}
+const spawnService = (name, args, env) => {
+  const child = spawn('pnpm', args, {
+    stdio: 'inherit',
+    env,
+    shell: true,
+  });
+  registerChild(name, child);
+  return child;
+};
+
+const startStack = async () => {
+  try {
+    spawnService('message-queue', ['-F', 'message-queue', 'dev'], {
+      ...process.env,
+    });
+
+    try {
+      await waitFor('http://localhost:3005/health');
+    } catch (error) {
+      console.error('message-queue did not become ready:', error);
+      shutdown({ code: 1 });
+      return;
+    }
+
+    spawnService(
+      'scenario-runner',
+      ['-F', 'scenario-runner', 'dev'],
+      {
+        ...process.env,
+        SCENARIO_NAME: scenarioName,
+      },
+    );
+
+    try {
+      await waitFor('http://localhost:3100/scenarios');
+    } catch (error) {
+      console.error('scenario-runner did not become ready:', error);
+      shutdown({ code: 1 });
+      return;
+    }
+
+    spawnService(
+      'visualizer-cli',
+      ['-F', '@reatiler/visualizer-cli', 'dev'],
+      {
+        ...process.env,
+        SCENARIO_NAME: scenarioName,
+      },
+    );
+  } catch (error) {
+    console.error('Failed to start dev stack:', error);
+    shutdown({ code: 1 });
+  }
+};
+
+startStack();
 
 const handleSignal = (signal) => {
   console.log(`Received ${signal}. Shutting down stack...`);
