@@ -1,0 +1,106 @@
+import axios from 'axios';
+import { applyEventToState, type TraceView } from './index.js';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+
+vi.mock('axios', () => {
+  const get = vi.fn();
+  const put = vi.fn();
+  const post = vi.fn();
+
+  return {
+    default: { get, put, post },
+    get,
+    put,
+    post,
+  };
+});
+
+type AxiosMock = {
+  get: Mock;
+  put: Mock;
+  post: Mock;
+};
+
+const mockedAxios = axios as unknown as AxiosMock;
+
+describe('applyEventToState', () => {
+  beforeEach(() => {
+    mockedAxios.get.mockReset();
+    mockedAxios.put.mockReset();
+  });
+
+  it('creates a new trace when none exists', async () => {
+    mockedAxios.get.mockResolvedValueOnce({ status: 404 });
+    mockedAxios.put.mockResolvedValueOnce({ status: 204 });
+
+    const occurredAt = '2024-01-01T00:00:00.000Z';
+
+    await applyEventToState({
+      traceId: 'trace-1',
+      domain: 'payments',
+      eventName: 'PaymentCreated',
+      occurredAt,
+    });
+
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      'http://localhost:3200/kv/retailer-happy-path/trace%3Atrace-1',
+      expect.any(Object),
+    );
+
+    expect(mockedAxios.put).toHaveBeenCalledWith(
+      'http://localhost:3200/kv/retailer-happy-path/trace%3Atrace-1',
+      {
+        traceId: 'trace-1',
+        lastUpdatedAt: occurredAt,
+        domains: {
+          payments: {
+            events: [
+              { eventName: 'PaymentCreated', occurredAt },
+            ],
+          },
+        },
+      },
+    );
+  });
+
+  it('appends an event to an existing trace', async () => {
+    const existing: TraceView = {
+      traceId: 'trace-1',
+      lastUpdatedAt: '2024-01-01T00:00:00.000Z',
+      domains: {
+        payments: {
+          events: [
+            {
+              eventName: 'PaymentCreated',
+              occurredAt: '2024-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+      },
+    };
+
+    mockedAxios.get.mockResolvedValueOnce({ status: 200, data: existing });
+    mockedAxios.put.mockResolvedValueOnce({ status: 204 });
+
+    const occurredAt = '2024-01-02T00:00:00.000Z';
+
+    await applyEventToState({
+      traceId: 'trace-1',
+      metadata: { domain: 'payments' },
+      eventName: 'PaymentSettled',
+      occurredAt,
+    });
+
+    expect(mockedAxios.put).toHaveBeenCalledTimes(1);
+
+    const [, updated] = mockedAxios.put.mock.calls[0];
+    const updatedTrace = updated as TraceView;
+
+    expect(updatedTrace.lastUpdatedAt).toBe(occurredAt);
+    expect(updatedTrace.domains.payments.events).toHaveLength(2);
+    expect(updatedTrace.domains.payments.events[1]).toEqual({
+      eventName: 'PaymentSettled',
+      occurredAt,
+    });
+  });
+});
