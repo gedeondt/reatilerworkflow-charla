@@ -1,11 +1,12 @@
 import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
 import { z } from 'zod';
+import { scenarioSchema, type Scenario } from '@reatiler/saga-kernel';
 
 type TraceEvent = {
   eventName: string;
@@ -65,7 +66,7 @@ type ScenarioSource = 'business' | 'draft';
 
 type DynamicScenarioRecord = {
   name: string;
-  definition: Record<string, unknown>;
+  definition: Scenario;
   origin: { type: 'draft'; draftId: string };
   appliedAt: string;
 };
@@ -149,13 +150,9 @@ const DraftSummarySchema = z
 
 type DraftSummary = z.infer<typeof DraftSummarySchema>;
 
-const ScenarioDefinitionSchema = z
-  .object({
-    name: z.string().min(1),
-  })
-  .passthrough();
+const ScenarioDefinitionSchema = scenarioSchema;
 
-type ScenarioDefinition = z.infer<typeof ScenarioDefinitionSchema>;
+type ScenarioDefinition = Scenario;
 
 const applyScenarioBodySchema = z.discriminatedUnion('type', [
   z.object({
@@ -266,6 +263,7 @@ const fetchDraftScenarioDefinition = async (
       throw new HttpError(502, {
         error: 'invalid_scenario_definition',
         message: 'Generated scenario JSON is invalid.',
+        issues: parsed.error.issues.map((issue) => issue.message),
       });
     }
 
@@ -348,6 +346,64 @@ const findBusinessDirectory = (startDir: string): string | null => {
   return null;
 };
 
+const loadBusinessScenarioDefinition = async (name: string): Promise<Scenario> => {
+  const businessDir = findBusinessDirectory(process.cwd());
+
+  if (!businessDir) {
+    throw new HttpError(500, {
+      error: 'business_directory_not_found',
+      message: 'Business scenarios directory could not be located.',
+    });
+  }
+
+  const filePath = join(businessDir, `${name}.json`);
+
+  let raw: string;
+
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+
+    if (code === 'ENOENT') {
+      throw new HttpError(404, {
+        error: 'scenario_not_found',
+        message: `Scenario "${name}" was not found in business definitions.`,
+      });
+    }
+
+    throw new HttpError(500, {
+      error: 'scenario_read_failed',
+      message: `Unable to read scenario "${name}" from disk.`,
+      cause: error instanceof Error ? error.message : error,
+    });
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    throw new HttpError(500, {
+      error: 'scenario_parse_failed',
+      message: `Scenario "${name}" contains invalid JSON.`,
+      cause: error instanceof Error ? error.message : error,
+    });
+  }
+
+  const validation = scenarioSchema.safeParse(parsed);
+
+  if (!validation.success) {
+    throw new HttpError(500, {
+      error: 'invalid_scenario_definition',
+      message: `Scenario "${name}" does not satisfy the scenario schema.`,
+      issues: validation.error.issues.map((issue) => issue.message),
+    });
+  }
+
+  return validation.data;
+};
+
 const listBusinessScenarioNames = async (): Promise<string[]> => {
   const businessDir = findBusinessDirectory(process.cwd());
 
@@ -383,20 +439,24 @@ app.get<{ Querystring: { name?: string } }>('/scenario-definition', async (reque
 
   const record = dynamicScenarios.get(name);
 
-  if (!record) {
-    return reply.status(404).send({
-      error: 'scenario_not_found',
-      message: `No dynamic scenario named "${name}" is registered.`,
-    });
+  if (record) {
+    return reply.send(record.definition);
   }
 
-  return reply.send({
-    name: record.name,
-    source: 'draft' as const,
-    definition: record.definition,
-    origin: record.origin,
-    appliedAt: record.appliedAt,
-  });
+  try {
+    const definition = await loadBusinessScenarioDefinition(name);
+    return reply.send(definition);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return reply.status(error.status).send(error.payload);
+    }
+
+    request.log.error({ err: error }, 'unexpected error loading business scenario definition');
+    return reply.status(500).send({
+      error: 'unexpected_error',
+      message: 'Failed to load scenario definition.',
+    });
+  }
 });
 
 app.get('/scenarios', async (_request, reply) => {

@@ -1,6 +1,7 @@
 import axios from 'axios';
-import { app, applyEventToState, type TraceView, __testing } from './index.js';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { type Scenario } from '@reatiler/saga-kernel';
+import { app, applyEventToState, type TraceView, __testing } from './index.js';
 
 vi.mock('axios', () => {
   const get = vi.fn();
@@ -244,15 +245,24 @@ describe('POST /scenario/apply', () => {
           hasGeneratedScenario: true,
         },
       })
-      .mockResolvedValueOnce({
-        status: 200,
-        data: {
-          name: 'dynamic-saga',
-          version: 1,
-          domains: [],
-          listeners: [],
+  .mockResolvedValueOnce({
+    status: 200,
+    data: {
+      name: 'dynamic-saga',
+      version: 1,
+      domains: [{ id: 'ventas', queue: 'ventas' }],
+      events: [{ name: 'PedidoCreado' }],
+      listeners: [
+        {
+          id: 'ventas-on-PedidoCreado',
+          on: { event: 'PedidoCreado' },
+          actions: [
+            { type: 'set-state', domain: 'ventas', status: 'RECIBIDO' },
+          ],
         },
-      });
+      ],
+    },
+  });
 
     const response = await app.inject({
       method: 'POST',
@@ -296,9 +306,25 @@ describe('GET /scenario-definition', () => {
   });
 
   it('returns the registered dynamic scenario definition', async () => {
+    const definition: Scenario = {
+      name: 'from-draft',
+      version: 1,
+      domains: [{ id: 'order', queue: 'orders' }],
+      events: [{ name: 'OrderPlaced' }],
+      listeners: [
+        {
+          id: 'order-on-OrderPlaced',
+          on: { event: 'OrderPlaced' },
+          actions: [
+            { type: 'emit', event: 'OrderPlaced', toDomain: 'order' },
+          ],
+        },
+      ],
+    } as const;
+
     __testing.registerDynamicScenario({
       name: 'from-draft',
-      definition: { name: 'from-draft', version: 1, domains: [], listeners: [] },
+      definition,
       origin: { type: 'draft', draftId: 'draft-xyz' },
       appliedAt: '2024-01-01T00:00:00.000Z',
     });
@@ -309,12 +335,6 @@ describe('GET /scenario-definition', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      name: 'from-draft',
-      source: 'draft',
-      definition: { name: 'from-draft', version: 1, domains: [], listeners: [] },
-      origin: { type: 'draft', draftId: 'draft-xyz' },
-      appliedAt: '2024-01-01T00:00:00.000Z',
-    });
+    expect(response.json()).toEqual(definition);
   });
 });

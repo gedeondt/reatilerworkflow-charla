@@ -15,6 +15,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@reatiler/saga-kernel": "workspace:*",
     "fastify": "^4.29.1",
     "@fastify/cors": "^8.5.0",
     "axios": "^1.7.0",
