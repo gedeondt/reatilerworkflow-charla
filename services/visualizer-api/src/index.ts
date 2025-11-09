@@ -41,6 +41,16 @@ export type NormalizedVisualizerEvent = {
   occurredAt: string;
 };
 
+type ScenarioBootstrapEvent = {
+  eventName: string;
+  data: Record<string, unknown>;
+} & Record<string, unknown>;
+
+type ScenarioBootstrapExample = {
+  queue: string;
+  event: ScenarioBootstrapEvent;
+};
+
 type LogEntry = {
   traceId: string;
   domain: string;
@@ -69,6 +79,7 @@ type DynamicScenarioRecord = {
   definition: Scenario;
   origin: { type: 'draft'; draftId: string };
   appliedAt: string;
+  bootstrapExample?: ScenarioBootstrapExample;
 };
 
 const logBuffer: LogEntry[] = [];
@@ -153,6 +164,35 @@ type DraftSummary = z.infer<typeof DraftSummarySchema>;
 const ScenarioDefinitionSchema = scenarioSchema;
 
 type ScenarioDefinition = Scenario;
+
+const ScenarioBootstrapEventSchema = z
+  .object({
+    eventName: z.string().min(1),
+    data: z.record(z.unknown()),
+  })
+  .passthrough();
+
+const ScenarioBootstrapSchema = z
+  .object({
+    queue: z.string().min(1),
+    event: ScenarioBootstrapEventSchema,
+  })
+  .passthrough();
+
+const GeneratedScenarioSchema = z
+  .object({
+    content: ScenarioDefinitionSchema,
+    createdAt: z.string(),
+    bootstrapExample: ScenarioBootstrapSchema.optional(),
+  })
+  .passthrough();
+
+const ScenarioDraftSchema = z
+  .object({
+    id: z.string(),
+    generatedScenario: GeneratedScenarioSchema.optional(),
+  })
+  .passthrough();
 
 const applyScenarioBodySchema = z.discriminatedUnion('type', [
   z.object({
@@ -276,6 +316,51 @@ const fetchDraftScenarioDefinition = async (
     throw new HttpError(502, {
       error: 'designer_unreachable',
       message: 'Failed to retrieve the generated scenario JSON.',
+      cause: error instanceof Error ? error.message : error,
+    });
+  }
+};
+
+const fetchDraftBootstrapExample = async (
+  draftId: string,
+): Promise<ScenarioBootstrapExample | undefined> => {
+  const url = `${SCENARIO_DESIGNER_BASE}/scenario-drafts/${encodeURIComponent(draftId)}`;
+
+  try {
+    const response = await axios.get(url, { validateStatus: () => true });
+
+    if (response.status === 404) {
+      throw new HttpError(404, {
+        error: 'draft_not_found',
+        message: `Draft "${draftId}" was not found in scenario-designer.`,
+      });
+    }
+
+    if (response.status >= 400) {
+      throw new HttpError(response.status, {
+        error: 'designer_error',
+        message: 'scenario-designer returned an error for the requested draft.',
+      });
+    }
+
+    const parsed = ScenarioDraftSchema.safeParse(response.data);
+
+    if (!parsed.success) {
+      throw new HttpError(502, {
+        error: 'invalid_draft_payload',
+        message: 'scenario-designer returned an invalid draft payload.',
+      });
+    }
+
+    return parsed.data.generatedScenario?.bootstrapExample;
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+
+    throw new HttpError(502, {
+      error: 'designer_unreachable',
+      message: 'Failed to retrieve the draft payload.',
       cause: error instanceof Error ? error.message : error,
     });
   }
@@ -428,6 +513,26 @@ app.get('/scenario', async (_request, reply) => {
   return reply.send({ name, source });
 });
 
+app.get('/scenario-bootstrap', async (_request, reply) => {
+  const { name, source } = getActiveScenario();
+
+  if (source !== 'draft') {
+    return reply.send({ hasBootstrap: false });
+  }
+
+  const record = dynamicScenarios.get(name);
+
+  if (!record || !record.bootstrapExample) {
+    return reply.send({ hasBootstrap: false });
+  }
+
+  return reply.send({
+    hasBootstrap: true,
+    queue: record.bootstrapExample.queue,
+    event: record.bootstrapExample.event,
+  });
+});
+
 app.get<{ Querystring: { name?: string } }>('/scenario-definition', async (request, reply) => {
   const { name } = request.query ?? {};
 
@@ -517,6 +622,17 @@ app.post('/scenario/apply', async (request, reply) => {
     }
 
     const definition = await fetchDraftScenarioDefinition(body.draftId);
+    let bootstrapExample: ScenarioBootstrapExample | undefined;
+
+    try {
+      bootstrapExample = await fetchDraftBootstrapExample(body.draftId);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        app.log.warn({ err: error }, 'failed to load bootstrap example for draft');
+      } else {
+        app.log.warn({ err: error }, 'unexpected error loading bootstrap example for draft');
+      }
+    }
     const scenarioName = definition.name;
 
     registerDynamicScenario({
@@ -524,6 +640,7 @@ app.post('/scenario/apply', async (request, reply) => {
       definition,
       origin: { type: 'draft', draftId: body.draftId },
       appliedAt: new Date().toISOString(),
+      bootstrapExample,
     });
 
     setActiveScenario(scenarioName, 'draft');
