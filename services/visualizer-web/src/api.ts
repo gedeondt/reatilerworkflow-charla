@@ -7,6 +7,7 @@ import type {
   DraftSummary,
   MarkReadyResponse,
   DraftCreationResponse,
+  GenerateJsonResponse,
 } from "./types";
 
 const API_BASE =
@@ -101,6 +102,43 @@ export async function markDraftReady(draftId: string): Promise<MarkReadyResponse
     {
       method: "POST",
     }
+  );
+
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res));
+  }
+
+  return res.json();
+}
+
+export async function generateDraftJson(
+  draftId: string,
+): Promise<GenerateJsonResponse> {
+  const res = await fetch(
+    `${DESIGNER_BASE}/scenario-drafts/${encodeURIComponent(draftId)}/generate-json`,
+    {
+      method: "POST",
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res));
+  }
+
+  return res.json();
+}
+
+export async function refineScenarioDraft(
+  draftId: string,
+  feedback: string,
+): Promise<DraftCreationResponse> {
+  const res = await fetch(
+    `${DESIGNER_BASE}/scenario-drafts/${encodeURIComponent(draftId)}/refine`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback }),
+    },
   );
 
   if (!res.ok) {

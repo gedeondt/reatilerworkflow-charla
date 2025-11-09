@@ -8,7 +8,9 @@ import {
   fetchScenario,
   fetchScenarios,
   fetchTraces,
+  generateDraftJson,
   markDraftReady,
+  refineScenarioDraft,
 } from "./api";
 import type {
   DraftCreationResponse,
@@ -43,6 +45,12 @@ export default function App() {
   const [isDraftLoading, setIsDraftLoading] = useState<boolean>(false);
   const [isMarkingReady, setIsMarkingReady] = useState<boolean>(false);
   const [isApplyingDraft, setIsApplyingDraft] = useState<boolean>(false);
+  const [isGeneratingJson, setIsGeneratingJson] = useState<boolean>(false);
+  const [isRefiningDraft, setIsRefiningDraft] = useState<boolean>(false);
+  const [draftInfoMessage, setDraftInfoMessage] = useState<string | null>(null);
+  const [draftSuccessMessage, setDraftSuccessMessage] = useState<string | null>(
+    null,
+  );
   const [draftDescription, setDraftDescription] = useState<string>("");
   const [createDraftError, setCreateDraftError] = useState<string | null>(null);
   const [isCreatingDraft, setIsCreatingDraft] = useState<boolean>(false);
@@ -50,6 +58,7 @@ export default function App() {
     null,
   );
   const [isNewScenarioOpen, setIsNewScenarioOpen] = useState<boolean>(false);
+  const [refinementFeedback, setRefinementFeedback] = useState<string>("");
 
   useEffect(() => {
     const tick = () => setNow(new Date().toLocaleTimeString());
@@ -320,10 +329,14 @@ export default function App() {
     if (!trimmed) {
       setDraftError("introduce un ID de draft");
       setDraftSummary(null);
+      setDraftInfoMessage(null);
+      setDraftSuccessMessage(null);
       return;
     }
 
     setDraftError(null);
+    setDraftInfoMessage(null);
+    setDraftSuccessMessage(null);
     setIsDraftLoading(true);
 
     try {
@@ -348,6 +361,8 @@ export default function App() {
     }
 
     setDraftError(null);
+    setDraftInfoMessage(null);
+    setDraftSuccessMessage(null);
     setIsMarkingReady(true);
 
     try {
@@ -372,6 +387,8 @@ export default function App() {
     }
 
     setDraftError(null);
+    setDraftInfoMessage(null);
+    setDraftSuccessMessage(null);
     setIsApplyingDraft(true);
     const previewName = (
       draftSummary.generatedScenarioPreview as { name?: unknown } | undefined
@@ -413,12 +430,81 @@ export default function App() {
     }
   };
 
+  const handleGenerateDraftJson = async () => {
+    if (!draftSummary) {
+      return;
+    }
+
+    setDraftError(null);
+    setDraftSuccessMessage(null);
+    setDraftInfoMessage("Generando JSON del escenario...");
+    setIsGeneratingJson(true);
+
+    try {
+      await generateDraftJson(draftSummary.id);
+      const refreshed = await fetchDraftSummary(draftSummary.id);
+      setDraftSummary(refreshed);
+      setDraftInfoMessage(null);
+      setDraftSuccessMessage("JSON generado correctamente");
+    } catch (err) {
+      console.warn("Failed to generate scenario JSON", err);
+      setDraftInfoMessage(null);
+      setDraftError(
+        "Error generando JSON. Comprueba que OpenAI está disponible y que scenario-designer está levantado.",
+      );
+    } finally {
+      setIsGeneratingJson(false);
+    }
+  };
+
+  const handleRefinementFeedbackChange = (
+    event: React.ChangeEvent<HTMLTextAreaElement>,
+  ) => {
+    setRefinementFeedback(event.target.value);
+  };
+
+  const handleRefineDraft = async () => {
+    if (!draftSummary) {
+      return;
+    }
+
+    const trimmed = refinementFeedback.trim();
+
+    if (!trimmed) {
+      return;
+    }
+
+    setDraftError(null);
+    setDraftSuccessMessage(null);
+    setDraftInfoMessage("Refinando...");
+    setIsRefiningDraft(true);
+
+    try {
+      await refineScenarioDraft(draftSummary.id, trimmed);
+      const refreshed = await fetchDraftSummary(draftSummary.id);
+      setDraftSummary(refreshed);
+      setDraftInfoMessage(null);
+      setDraftSuccessMessage("Propuesta refinada correctamente");
+      setRefinementFeedback("");
+    } catch (err) {
+      console.warn("Failed to refine draft proposal", err);
+      setDraftInfoMessage(null);
+      setDraftError("Error refinando propuesta.");
+    } finally {
+      setIsRefiningDraft(false);
+    }
+  };
+
   const canMarkReady = Boolean(
     draftSummary?.hasGeneratedScenario && draftSummary.status !== "ready",
   );
   const canApplyDraft = Boolean(
     draftSummary?.status === "ready" && draftSummary.hasGeneratedScenario,
   );
+
+  const isDraftActionPending =
+    isGeneratingJson || isRefiningDraft || isMarkingReady || isApplyingDraft;
+  const canSubmitRefinement = refinementFeedback.trim().length > 0;
 
   const scenarioOptions = useMemo(() => {
     const map = new Map<string, ScenarioListItem>();
@@ -594,15 +680,23 @@ export default function App() {
         />
         <button
           type="submit"
-          disabled={isDraftLoading}
+          disabled={isDraftLoading || isDraftActionPending}
           className="px-2 py-1 rounded border border-zinc-600 text-xs hover:bg-zinc-800 disabled:opacity-50"
         >
           ver resumen
         </button>
         <button
           type="button"
+          onClick={handleGenerateDraftJson}
+          disabled={!draftSummary || isDraftLoading || isDraftActionPending}
+          className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          Generar JSON
+        </button>
+        <button
+          type="button"
           onClick={handleMarkDraftReady}
-          disabled={!draftSummary || !canMarkReady || isMarkingReady}
+          disabled={!draftSummary || !canMarkReady || isDraftActionPending}
           className="px-2 py-1 rounded border border-yellow-600 text-xs text-yellow-300 hover:bg-zinc-800 disabled:opacity-50"
         >
           marcar listo
@@ -610,7 +704,7 @@ export default function App() {
         <button
           type="button"
           onClick={handleApplyDraft}
-          disabled={!draftSummary || !canApplyDraft || isApplyingDraft}
+          disabled={!draftSummary || !canApplyDraft || isDraftActionPending}
           className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
         >
           aplicar escenario
@@ -619,39 +713,66 @@ export default function App() {
       {draftError ? (
         <div className="text-red-400">{draftError}</div>
       ) : null}
+      {draftInfoMessage ? (
+        <div className="text-zinc-400">{draftInfoMessage}</div>
+      ) : null}
+      {draftSuccessMessage ? (
+        <div className="text-green-400">{draftSuccessMessage}</div>
+      ) : null}
       {isDraftLoading ? (
         <div className="text-zinc-500">cargando resumen…</div>
       ) : null}
       {draftSummary ? (
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-1">
-            <div>
-              <span className="text-zinc-500">estado:</span>{" "}
-              <span className="text-green-400">{draftSummary.status}</span>
+        <div className="space-y-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-1">
+              <div>
+                <span className="text-zinc-500">estado:</span>{" "}
+                <span className="text-green-400">{draftSummary.status}</span>
+              </div>
+              <div className="text-zinc-400">
+                {draftSummary.guidance ??
+                  "Valida el contenido antes de aplicar el escenario."}
+              </div>
             </div>
-            <div className="text-zinc-400">
-              {draftSummary.guidance ??
-                "Valida el contenido antes de aplicar el escenario."}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <div className="uppercase text-zinc-500">propuesta actual</div>
-            <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">
-              {formatJson(draftSummary.currentProposal)}
-            </pre>
-          </div>
-          {draftSummary.hasGeneratedScenario ? (
-            <div className="space-y-1 md:col-span-2">
-              <div className="uppercase text-zinc-500">json generado</div>
-              <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-56 whitespace-pre-wrap">
-                {formatJson(draftSummary.generatedScenarioPreview)}
+            <div className="space-y-1">
+              <div className="uppercase text-zinc-500">propuesta actual</div>
+              <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">
+                {formatJson(draftSummary.currentProposal)}
               </pre>
             </div>
-          ) : (
-            <div className="text-zinc-500 md:col-span-2">
-              Genera el JSON del escenario para poder aplicarlo.
+            {draftSummary.hasGeneratedScenario ? (
+              <div className="space-y-1 md:col-span-2">
+                <div className="uppercase text-zinc-500">json generado</div>
+                <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-56 whitespace-pre-wrap">
+                  {formatJson(draftSummary.generatedScenarioPreview)}
+                </pre>
+              </div>
+            ) : (
+              <div className="text-zinc-500 md:col-span-2">
+                Genera el JSON del escenario para poder aplicarlo.
+              </div>
+            )}
+          </div>
+          <div className="space-y-2">
+            <textarea
+              value={refinementFeedback}
+              onChange={handleRefinementFeedbackChange}
+              placeholder="Introduce mejoras o feedback..."
+              disabled={!draftSummary || isDraftActionPending}
+              className="w-full min-h-[72px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600 disabled:opacity-50"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRefineDraft}
+                disabled={!draftSummary || !canSubmitRefinement || isDraftActionPending}
+                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Refinar propuesta
+              </button>
             </div>
-          )}
+          </div>
         </div>
       ) : null}
     </div>

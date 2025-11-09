@@ -59,7 +59,7 @@ const LOG_BUFFER_SIZE = 200;
 
 const BUSINESS_DIR_NAME = 'business';
 const SCENARIO_DESIGNER_BASE =
-  process.env.SCENARIO_DESIGNER_BASE ?? 'http://localhost:3400';
+  process.env.SCENARIO_DESIGNER_BASE ?? 'http://localhost:3201';
 
 type ScenarioSource = 'business' | 'draft';
 

@@ -21,7 +21,14 @@ run("runner", "pnpm", ["-F", "scenario-runner", "dev"], {
 
 // --- nuevas piezas ---
 run("state-store", "pnpm", ["-F", "@reatiler/state-store", "dev"]);
-run("visualizer-api", "pnpm", ["-F", "@reatiler/visualizer-api", "dev"]);
+run(
+  "visualizer-api",
+  "pnpm",
+  ["-F", "@reatiler/visualizer-api", "dev"],
+  {
+    SCENARIO_DESIGNER_BASE: "http://localhost:3201",
+  },
+);
 run("scenario-designer", "pnpm", ["-F", "@reatiler/scenario-designer", "dev"]);
 
 // --- opcional: frontend ---
