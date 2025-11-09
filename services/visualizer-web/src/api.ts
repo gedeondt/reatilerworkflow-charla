@@ -8,6 +8,7 @@ import type {
   MarkReadyResponse,
   DraftCreationResponse,
   GenerateJsonResponse,
+  ScenarioBootstrapResponse,
 } from "./types";
 
 const API_BASE =
@@ -65,6 +66,16 @@ export async function fetchScenarios(): Promise<ScenariosResponse> {
   const res = await fetch(`${API_BASE}/scenarios`);
   if (!res.ok) {
     throw new Error(`Failed to fetch scenarios (${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function fetchScenarioBootstrap(): Promise<ScenarioBootstrapResponse> {
+  const res = await fetch(`${API_BASE}/scenario-bootstrap`);
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch scenario bootstrap (${res.status})`);
   }
 
   return res.json();

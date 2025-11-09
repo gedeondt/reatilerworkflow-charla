@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   applyScenarioByName,
   applyScenarioDraft,
@@ -6,6 +6,7 @@ import {
   fetchDraftSummary,
   fetchLogs,
   fetchScenario,
+  fetchScenarioBootstrap,
   fetchScenarios,
   fetchTraces,
   generateDraftJson,
@@ -20,8 +21,14 @@ import type {
   TraceView,
 } from "./types";
 
+type BootstrapHint = {
+  queue: string;
+  event: Record<string, unknown>;
+};
+
 const defaultScenario =
   import.meta.env.VITE_SCENARIO_NAME || "retailer-happy-path";
+const queueBase = import.meta.env.VITE_QUEUE_BASE || "http://localhost:3005";
 
 export default function App() {
   const [traces, setTraces] = useState<TraceView[]>([]);
@@ -59,6 +66,21 @@ export default function App() {
   );
   const [isNewScenarioOpen, setIsNewScenarioOpen] = useState<boolean>(false);
   const [refinementFeedback, setRefinementFeedback] = useState<string>("");
+  const [bootstrapHint, setBootstrapHint] = useState<BootstrapHint | null>(null);
+
+  const readScenarioBootstrap = useCallback(async (): Promise<BootstrapHint | null> => {
+    try {
+      const response = await fetchScenarioBootstrap();
+
+      if (response.hasBootstrap) {
+        return { queue: response.queue, event: response.event };
+      }
+    } catch (err) {
+      console.warn("Failed to load scenario bootstrap", err);
+    }
+
+    return null;
+  }, []);
 
   useEffect(() => {
     const tick = () => setNow(new Date().toLocaleTimeString());
@@ -178,6 +200,30 @@ export default function App() {
 
   useEffect(() => {
     if (!activeScenario) {
+      setBootstrapHint(null);
+      return;
+    }
+
+    let cancelled = false;
+    setBootstrapHint(null);
+
+    const loadBootstrapHint = async () => {
+      const hint = await readScenarioBootstrap();
+
+      if (!cancelled) {
+        setBootstrapHint(hint);
+      }
+    };
+
+    void loadBootstrapHint();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeScenario, activeScenarioSource, readScenarioBootstrap]);
+
+  useEffect(() => {
+    if (!activeScenario) {
       return;
     }
 
@@ -267,6 +313,24 @@ export default function App() {
           source: response.source ?? "business",
         })
       );
+
+      try {
+        const refreshed = await fetchScenario();
+        setActiveScenario(refreshed.name);
+        setActiveScenarioSource(refreshed.source ?? "business");
+        setAvailableScenarios((prev) =>
+          upsertScenarioItem(prev, {
+            name: refreshed.name,
+            source: refreshed.source ?? "business",
+          })
+        );
+      } catch (refreshError) {
+        console.warn("Failed to refresh scenario after switching", refreshError);
+      }
+
+      setBootstrapHint(null);
+      const bootstrap = await readScenarioBootstrap();
+      setBootstrapHint(bootstrap);
     } catch (err) {
       console.warn("Failed to switch scenario", err);
       setScenarioError(
@@ -426,6 +490,24 @@ export default function App() {
       setRefinementFeedback("");
       setCreateDraftError(null);
       setIsNewScenarioOpen(false);
+
+      try {
+        const refreshed = await fetchScenario();
+        setActiveScenario(refreshed.name);
+        setActiveScenarioSource(refreshed.source ?? "business");
+        setAvailableScenarios((prev) =>
+          upsertScenarioItem(prev, {
+            name: refreshed.name,
+            source: refreshed.source ?? "business",
+          })
+        );
+      } catch (refreshError) {
+        console.warn("Failed to refresh scenario after applying draft", refreshError);
+      }
+
+      setBootstrapHint(null);
+      const bootstrap = await readScenarioBootstrap();
+      setBootstrapHint(bootstrap);
     } catch (err) {
       console.warn("Failed to apply draft scenario", err);
       setDraftError(
@@ -798,10 +880,21 @@ export default function App() {
           <div className="flex-1 flex items-center justify-center text-zinc-600 text-xs">
             <div className="text-center space-y-1">
               <div>No traces received yet.</div>
-              <div>Trigger your first event by posting an OrderPlaced:</div>
-              <div className="mt-1 text-[10px] text-green-500">
-                curl -X POST http://localhost:3005/queues/orders/messages ...
-              </div>
+              {bootstrapHint ? (
+                <>
+                  <div>Trigger your first event with this bootstrap:</div>
+                  <pre className="mt-1 text-[10px] text-green-500 text-left whitespace-pre-wrap">
+                    {buildBootstrapCurl(queueBase, bootstrapHint.queue, bootstrapHint.event)}
+                  </pre>
+                </>
+              ) : (
+                <>
+                  <div>Trigger your first event by posting an OrderPlaced:</div>
+                  <div className="mt-1 text-[10px] text-green-500">
+                    {`curl -X POST ${queueBase}/queues/orders/messages ...`}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -849,6 +942,21 @@ function formatJson(value: unknown): string {
   } catch (error) {
     return String(value);
   }
+}
+
+function buildBootstrapCurl(
+  baseUrl: string,
+  queue: string,
+  event: Record<string, unknown>,
+): string {
+  const serializedEvent = JSON.stringify(event, null, 2).replace(/'/g, "\'");
+  const queuePath = encodeURIComponent(queue);
+
+  return [
+    `curl -X POST ${baseUrl}/queues/${queuePath}/messages \\`,
+    '  -H "Content-Type: application/json" \',
+    `  -d '${serializedEvent}'`,
+  ].join("\n");
 }
 
 function upsertScenarioItem(

@@ -245,24 +245,64 @@ describe('POST /scenario/apply', () => {
           hasGeneratedScenario: true,
         },
       })
-  .mockResolvedValueOnce({
-    status: 200,
-    data: {
-      name: 'dynamic-saga',
-      version: 1,
-      domains: [{ id: 'ventas', queue: 'ventas' }],
-      events: [{ name: 'PedidoCreado' }],
-      listeners: [
-        {
-          id: 'ventas-on-PedidoCreado',
-          on: { event: 'PedidoCreado' },
-          actions: [
-            { type: 'set-state', domain: 'ventas', status: 'RECIBIDO' },
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          name: 'dynamic-saga',
+          version: 1,
+          domains: [{ id: 'ventas', queue: 'ventas' }],
+          events: [{ name: 'PedidoCreado' }],
+          listeners: [
+            {
+              id: 'ventas-on-PedidoCreado',
+              on: { event: 'PedidoCreado' },
+              actions: [
+                { type: 'set-state', domain: 'ventas', status: 'RECIBIDO' },
+              ],
+            },
           ],
         },
-      ],
-    },
-  });
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          id: 'draft-2',
+          generatedScenario: {
+            content: {
+              name: 'dynamic-saga',
+              version: 1,
+              domains: [{ id: 'ventas', queue: 'ventas' }],
+              events: [{ name: 'PedidoCreado' }],
+              listeners: [
+                {
+                  id: 'ventas-on-PedidoCreado',
+                  on: { event: 'PedidoCreado' },
+                  actions: [
+                    {
+                      type: 'set-state',
+                      domain: 'ventas',
+                      status: 'RECIBIDO',
+                    },
+                  ],
+                },
+              ],
+            },
+            createdAt: '2024-01-01T00:00:00.000Z',
+            bootstrapExample: {
+              queue: 'ventas',
+              event: {
+                eventName: 'PedidoCreado',
+                version: 1,
+                eventId: 'evt-1',
+                traceId: 'trace-1',
+                correlationId: 'saga-1',
+                occurredAt: '2024-01-01T00:00:00.000Z',
+                data: { pedidoId: 'PED-1' },
+              },
+            },
+          },
+        },
+      });
 
     const response = await app.inject({
       method: 'POST',
@@ -283,15 +323,21 @@ describe('POST /scenario/apply', () => {
       name: 'dynamic-saga',
       origin: { type: 'draft', draftId: 'draft-2' },
     });
+    expect(dynamicScenarios[0]).toHaveProperty('bootstrapExample.queue', 'ventas');
+    expect(dynamicScenarios[0]?.bootstrapExample?.event).toMatchObject({
+      eventName: 'PedidoCreado',
+      data: { pedidoId: 'PED-1' },
+    });
 
     expect(__testing.getActiveScenario()).toEqual({
       name: 'dynamic-saga',
       source: 'draft',
     });
 
-    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(3);
     expect(mockedAxios.get.mock.calls[0][0]).toContain('/summary');
     expect(mockedAxios.get.mock.calls[1][0]).toContain('/json');
+    expect(mockedAxios.get.mock.calls[2][0]).toMatch(/\/scenario-drafts\/draft-2$/u);
   });
 });
 
@@ -336,5 +382,67 @@ describe('GET /scenario-definition', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual(definition);
+  });
+});
+
+describe('GET /scenario-bootstrap', () => {
+  it('returns hasBootstrap false when the active scenario is from business', async () => {
+    __testing.setActiveScenarioName('retailer-happy-path', 'business');
+
+    const response = await app.inject({ method: 'GET', url: '/scenario-bootstrap' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ hasBootstrap: false });
+  });
+
+  it('returns the stored bootstrap for the active draft scenario', async () => {
+    const definition: Scenario = {
+      name: 'dynamic-saga',
+      version: 1,
+      domains: [{ id: 'ventas', queue: 'ventas' }],
+      events: [{ name: 'PedidoCreado' }],
+      listeners: [
+        {
+          id: 'ventas-on-PedidoCreado',
+          on: { event: 'PedidoCreado' },
+          actions: [
+            { type: 'emit', event: 'PedidoCreado', toDomain: 'ventas' },
+          ],
+        },
+      ],
+    } as const;
+
+    __testing.registerDynamicScenario({
+      name: 'dynamic-saga',
+      definition,
+      origin: { type: 'draft', draftId: 'draft-abc' },
+      appliedAt: '2024-01-01T00:00:00.000Z',
+      bootstrapExample: {
+        queue: 'ventas',
+        event: {
+          eventName: 'PedidoCreado',
+          version: 1,
+          eventId: 'evt-1',
+          traceId: 'trace-1',
+          correlationId: 'saga-1',
+          occurredAt: '2024-01-01T00:00:00.000Z',
+          data: { pedidoId: 'PED-9' },
+        },
+      },
+    });
+
+    __testing.setActiveScenarioName('dynamic-saga', 'draft');
+
+    const response = await app.inject({ method: 'GET', url: '/scenario-bootstrap' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      hasBootstrap: true,
+      queue: 'ventas',
+      event: expect.objectContaining({
+        eventName: 'PedidoCreado',
+        data: { pedidoId: 'PED-9' },
+      }),
+    });
   });
 });

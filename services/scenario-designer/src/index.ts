@@ -48,6 +48,22 @@ type ScenarioProposal = z.infer<typeof ScenarioProposalSchema>;
 
 type ModelDraftResponse = z.infer<typeof DraftResponseSchema>;
 
+const ScenarioBootstrapEventSchema = z
+  .object({
+    eventName: z.string().trim().min(1),
+    data: z.record(z.unknown()),
+  })
+  .passthrough();
+
+const ScenarioBootstrapSchema = z
+  .object({
+    queue: z.string().trim().min(1),
+    event: ScenarioBootstrapEventSchema,
+  })
+  .passthrough();
+
+type ScenarioBootstrapExample = z.infer<typeof ScenarioBootstrapSchema>;
+
 type ScenarioDraftHistoryEntry = {
   type: ScenarioDraftHistoryEntryType;
   userNote: string;
@@ -58,6 +74,7 @@ type ScenarioDraftHistoryEntry = {
 type GeneratedScenario = {
   content: Scenario;
   createdAt: string;
+  bootstrapExample?: ScenarioBootstrapExample;
 };
 
 type ScenarioDraftStatus = 'draft' | 'ready';
@@ -125,6 +142,7 @@ const generateJsonBodySchema = z
   .optional();
 
 class InvalidModelResponseError extends Error {}
+class ScenarioBootstrapGenerationError extends Error {}
 class ScenarioJsonValidationError extends Error {
   details: string[];
 
@@ -259,6 +277,73 @@ const requestOpenAIContent = async (
 ): Promise<string> =>
   requestJsonContent({ messages, temperature });
 
+const scenarioBootstrapPrompt = (scenario: Scenario): string => {
+  const scenarioJson = JSON.stringify(scenario, null, 2);
+
+  return [
+    'Analiza el escenario descrito a continuación y prepara un único evento inicial para arrancar la SAGA.',
+    'Responde exclusivamente con un objeto JSON que siga esta estructura exacta:',
+    '{
+      "queue": "nombre-cola",
+      "event": {
+        "eventName": "...",
+        "version": 1,
+        "eventId": "evt-1",
+        "traceId": "trace-1",
+        "correlationId": "saga-1",
+        "occurredAt": "2025-01-01T00:00:00.000Z",
+        "data": { }
+      }
+    }',
+    'Requisitos clave:',
+    '- Selecciona una cola (queue) que exista dentro de los dominios del escenario.',
+    '- Usa un eventName coherente con los eventos definidos en el escenario.',
+    '- Completa version, eventId, traceId, correlationId y occurredAt con ejemplos plausibles.',
+    '- Incluye en data únicamente los campos imprescindibles para que la historia del escenario tenga sentido.',
+    '- No añadas explicaciones ni texto fuera del JSON.',
+    'Escenario de referencia:',
+    scenarioJson,
+  ].join('\n\n');
+};
+
+const generateScenarioBootstrapExample = async (
+  scenario: Scenario,
+): Promise<ScenarioBootstrapExample> => {
+  let response: string;
+
+  try {
+    response = await requestJsonContent({
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Responde siempre en español. Ajusta la salida al DSL de escenarios definido en este proyecto. No añadas texto fuera del JSON.',
+        },
+        { role: 'user', content: scenarioBootstrapPrompt(scenario) },
+      ],
+      temperature: 0.2,
+    });
+  } catch (error) {
+    throw new ScenarioBootstrapGenerationError('No se pudo solicitar el bootstrap al modelo.');
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(response);
+  } catch (error) {
+    throw new ScenarioBootstrapGenerationError('El bootstrap generado no es JSON válido.');
+  }
+
+  const validation = ScenarioBootstrapSchema.safeParse(parsed);
+
+  if (!validation.success) {
+    throw new ScenarioBootstrapGenerationError('El bootstrap generado no cumple los requisitos mínimos.');
+  }
+
+  return validation.data;
+};
+
 const formatIssuePath = (path: (string | number)[]): string =>
   path
     .map((segment) =>
@@ -306,7 +391,7 @@ const generateScenarioJson = async (
   const systemMessage: ChatCompletionMessageParam = {
     role: 'system',
     content:
-      'Eres un asistente experto en retail que genera escenarios compatibles con el runner interno. Responde siempre con JSON válido sin texto adicional.',
+      'Responde siempre en español. Ajusta la salida al DSL de escenarios definido en este proyecto. No añadas texto fuera del JSON.',
   };
 
   const baseMessages: ChatCompletionMessageParam[] = [
@@ -501,9 +586,22 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
   try {
     const scenarioJson = await generateScenarioJson(draft, language);
 
+    let bootstrapExample: ScenarioBootstrapExample | undefined;
+
+    try {
+      bootstrapExample = await generateScenarioBootstrapExample(scenarioJson);
+    } catch (error) {
+      if (error instanceof ScenarioBootstrapGenerationError) {
+        app.log.warn({ err: error }, 'No se pudo generar bootstrap para el escenario.');
+      } else {
+        app.log.warn({ err: error }, 'Error inesperado generando bootstrap para el escenario.');
+      }
+    }
+
     draft.generatedScenario = {
       content: scenarioJson,
       createdAt: new Date().toISOString(),
+      ...(bootstrapExample ? { bootstrapExample } : {}),
     };
     draft.status = 'draft';
 

@@ -79,6 +79,10 @@ export type DraftCreationResponse = {
   generatedScenario?: {
     content: Record<string, unknown>;
     createdAt: string;
+    bootstrapExample?: {
+      queue: string;
+      event: Record<string, unknown>;
+    };
   };
 };
 
@@ -87,3 +91,7 @@ export type GenerateJsonResponse = {
   status: 'generated';
   generatedScenario: Record<string, unknown>;
 };
+
+export type ScenarioBootstrapResponse =
+  | { hasBootstrap: false }
+  | { hasBootstrap: true; queue: string; event: Record<string, unknown> };

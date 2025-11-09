@@ -7,11 +7,8 @@ export type ChatCompletionResponseFormat =
 
 export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o';
 
-const SYSTEM_MESSAGE = [
-  'Responde siempre en español, sin traducir al inglés.',
-  'Cuando se te solicite una definición de escenario ejecutable, utiliza exclusivamente el DSL oficial del proyecto: propiedades name, version, domains (con id y queue), events (con name) y listeners (con id, on.event, delayMs opcional y actions de tipo emit o set-state).',
-  'No inventes claves nuevas ni añadas comentarios fuera del formato indicado en cada instrucción.',
-].join(' ');
+const SYSTEM_MESSAGE =
+  'Responde siempre en español. Ajusta la salida al DSL de escenarios definido en este proyecto. No añadas texto fuera del JSON.';
 
 export class ConfigurationError extends Error {}
 export class OpenAIRequestFailedError extends Error {}
