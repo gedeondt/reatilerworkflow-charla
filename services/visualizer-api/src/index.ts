@@ -376,7 +376,10 @@ const appendLogEntry = (entry: LogEntry) => {
 const getLogEntries = (): LogEntry[] => [...logBuffer];
 
 const isRoutineVisualizerPath = (path: string): boolean =>
-  path === '/scenario' || path.startsWith('/logs') || path.startsWith('/traces');
+  path === '/scenario' ||
+  path.startsWith('/logs') ||
+  path.startsWith('/traces') ||
+  path.startsWith('/kv/');
 
 const app = Fastify({ logger: true, disableRequestLogging: true });
 

@@ -12,22 +12,25 @@ type NamespaceParams = {
   ns: string;
 };
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, disableRequestLogging: true });
 
 app.addHook('onResponse', (request, reply, done) => {
-  const [path] = request.url.split('?');
-  const isRoutineRoute =
-    path === '/traces' ||
-    path === '/logs' ||
-    path === '/scenario' ||
-    path.startsWith('/kv/');
+  const rawUrl = request.raw.url ?? request.url ?? '';
+  const url = rawUrl.split('?')[0] ?? rawUrl;
 
-  if (isRoutineRoute) {
+  if (url.startsWith('/kv/')) {
     done();
     return;
   }
 
-  request.log.info({ url: request.url, statusCode: reply.statusCode }, 'handled');
+  request.log.info(
+    {
+      method: request.method,
+      url,
+      statusCode: reply.statusCode,
+    },
+    'request completed',
+  );
   done();
 });
 
