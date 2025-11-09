@@ -1,65 +1,72 @@
-# Escenario principal: Reatiler Workflow Monorepo
+# Orquestación principal del Reatiler Workflow
 
-Este monorepo cubre cuatro dominios fundamentales para la orquestación de pedidos: **Order**, **Inventory**, **Payments** y **Shipping**. Cada servicio expone una API HTTP mínima y se integra mediante eventos publicados en una cola de mensajes.
+El monorepo modela una SAGA retail completamente declarativa. Los escenarios bajo `business/` describen dominios, eventos y listeners que el runtime ejecuta sin lógica adicional. Esta sección resume el comportamiento de referencia y cómo interactúan los servicios para ofrecer simulaciones de extremo a extremo.【F:business/retailer-happy-path.json†L1-L78】【F:services/scenario-runner/src/index.ts†L400-L520】
 
-## APIs mínimas por dominio
+## Dominios y colas estándar
 
-### Order Service
-- `POST /orders`
-- `POST /orders/{id}/cancel`
-- `GET /orders/{id}`
+El escenario `retailer-happy-path.json` define cuatro dominios conectados a las siguientes colas de `message-queue`:
 
-### Inventory Service
-- `POST /reservations`
-- `POST /reservations/{id}/commit`
-- `POST /reservations/{id}/release`
-- `GET /reservations/{id}`
+| Dominio | Cola | Descripción |
+| --- | --- | --- |
+| `order` | `orders` | Origen y cierre de la orden retail. |
+| `inventory` | `inventory` | Reserva y liberación de stock. |
+| `payments` | `payments` | Autorización y captura de cobros. |
+| `shipping` | `shipping` | Preparación y despacho de envíos. |
 
-### Payments Service
-- `POST /payments/authorize`
-- `POST /payments/capture`
-- `POST /payments/refund`
-- `GET /payments/{id}`
-
-### Shipping Service
-- `POST /shipments`
-- `POST /shipments/{id}/dispatch`
-- `GET /shipments/{id}`
+Puedes añadir dominios adicionales según el flujo que quieras simular, siempre respetando el esquema del DSL.【F:packages/saga-kernel/src/schema.ts†L1-L104】
 
 ## Flujo SAGA (happy path)
 
-1. `POST /orders` → evento **OrderPlaced** enviado a la cola de *inventory*.
-2. Inventory crea la reserva → evento **InventoryReserved** enviado a la cola de *payments*.
-3. Payments autoriza el pago → evento **PaymentAuthorized** enviado a la cola de *shipping*.
-4. Shipping prepara el envío → evento **ShipmentPrepared** enviado a la cola de *payments*.
-5. Payments captura el pago → evento **PaymentCaptured** enviado a la cola de *orders*.
-6. Order marca el pedido como confirmado → evento **OrderConfirmed** (solo log interno).
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Cliente externo
+    participant SR as scenario-runner
+    participant MQ as message-queue
+    participant O as order
+    participant I as inventory
+    participant P as payments
+    participant S as shipping
 
-## Compensaciones controladas por banderas de entorno
-
-- `ALLOW_RESERVATION=false` ⇒ evento **InventoryReservationFailed** → Order cancela el pedido (**OrderCancelled**).
-- `ALLOW_AUTH=false` ⇒ evento **PaymentFailed** → Inventory libera la reserva (**InventoryReleased**) → Order cancela el pedido (**OrderCancelled**).
-- `ALLOW_PREPARE=false` ⇒ evento **ShipmentFailed**; si ya hubo captura de pago, generar **PaymentRefunded**; Order finaliza como **OrderFailed** o **OrderCancelled** según corresponda.
-
-## Formato de eventos
-
-Todos los eventos deben seguir el formato JSON:
-
-```json
-{
-  "eventName": "string",
-  "version": 1,
-  "eventId": "uuid",
-  "traceId": "uuid",
-  "correlationId": "orderId",
-  "occurredAt": "ISO-8601",
-  "causationId": "uuid opcional",
-  "data": { /* payload específico del evento */ }
-}
+    C->>SR: Evento bootstrap (ej. OrderPlaced)
+    SR-->>MQ: OrderPlaced (cola orders)
+    MQ-->>SR: listener order-on-OrderPlaced
+    SR-->>MQ: InventoryReserved (cola inventory)
+    MQ-->>SR: listener inventory-on-InventoryReserved
+    SR-->>MQ: PaymentAuthorized (cola payments)
+    MQ-->>SR: listener payments-on-PaymentAuthorized
+    SR-->>MQ: ShipmentPrepared (cola shipping)
+    MQ-->>SR: listener shipping-on-ShipmentPrepared
+    SR-->>MQ: PaymentCaptured (cola orders)
+    MQ-->>SR: listener order-on-PaymentCaptured
+    SR-->>C: OrderConfirmed (evento final reflejado en visualizer)
 ```
 
-## No objetivos
+Cada listener puede declarar un `delayMs` para simular tiempos de procesamiento y emite eventos hacia otros dominios utilizando acciones `emit`. Las acciones `set-state` actualizan el estado visible por `visualizer-api`, el CLI y la interfaz web.【F:business/retailer-happy-path.json†L1-L78】
 
-- No se modelan catálogos, impuestos ni clientes.
-- No se implementan mecanismos de reintentos automáticos.
-- Los almacenamientos serán in-memory durante esta fase inicial.
+## Escenarios alternativos y compensaciones
+
+El DSL permite definir caminos de compensación usando eventos adicionales y acciones `set-state` con estados que incluyan `fail`, `cancel`, `refund`, etc. Estos estados son interpretados por el CLI y la web para colorear los eventos y resaltar fallos o compensaciones.【F:packages/visualizer-cli/src/index.ts†L85-L120】
+
+Para disparar flujos alternativos puedes:
+
+1. Editar el JSON en `business/` y reiniciar `scenario-runner` (o usar `/scenario` en `scenario-runner` para recargarlo).
+2. Generar un borrador en `scenario-designer`, refinarlo con feedback y aplicar el draft desde `visualizer-api` o `visualizer-web` cuando esté marcado como `ready`. Esto permite iterar rápidamente sin tocar el repositorio hasta tener una versión final.【F:services/scenario-designer/src/index.ts†L440-L840】【F:services/visualizer-api/src/index.ts†L544-L720】
+
+## Visualización y estado compartido
+
+- `scenario-runner` replica cada evento consumido hacia la cola `visualizer`, que contiene una versión reducida con `traceId`, dominio y timestamp.
+- `visualizer-api` procesa esa cola, normaliza los eventos, los guarda por `traceId` en `state-store` y expone el estado mediante `/traces`, `/logs`, `/scenario`, `/scenario-bootstrap` y `/scenarios`.
+- `visualizer-web` y `@reatiler/visualizer-cli` consultan esas APIs y representan la historia completa de la SAGA activa.【F:services/visualizer-api/src/index.ts†L540-L1020】【F:services/visualizer-web/src/api.ts†L1-L120】【F:packages/visualizer-cli/src/index.ts†L1-L120】
+
+## Evento inicial
+
+Los escenarios pueden empezar con cualquier evento definido en `events`. Si usas `scenario-designer`, al generar el JSON obtendrás opcionalmente un ejemplo de evento bootstrap (cola + payload) para iniciar la ejecución vía `message-queue`. Puedes enviarlo con:
+
+```bash
+curl -X POST http://localhost:3005/queues/<cola>/messages \
+  -H 'content-type: application/json' \
+  -d @bootstrap.json
+```
+
+El CLI y la interfaz web detectarán automáticamente nuevas trazas y actualizarán la vista cada vez que llegue un evento a la cola `visualizer`.
