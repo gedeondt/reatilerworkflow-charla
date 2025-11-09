@@ -9,9 +9,32 @@ const domainSchema = z
 
 export type Domain = z.infer<typeof domainSchema>;
 
+const payloadPrimitiveSchema = z.enum(['string', 'number', 'boolean', 'string[]', 'number[]', 'boolean[]']);
+
+type PayloadPrimitive = z.infer<typeof payloadPrimitiveSchema>;
+
+const payloadFlatObjectSchema: z.ZodType<Record<string, PayloadPrimitive>> = z
+  .object({})
+  .catchall(payloadPrimitiveSchema);
+
+const payloadArrayOfFlatObjectsSchema = z
+  .array(payloadFlatObjectSchema)
+  .nonempty('Array schemas must include at least one object with primitive fields');
+
+const payloadFieldSchema = z.union([
+  payloadPrimitiveSchema,
+  payloadFlatObjectSchema,
+  payloadArrayOfFlatObjectsSchema
+]);
+
+const payloadSchema = z.object({}).catchall(payloadFieldSchema);
+
+export type PayloadSchema = z.infer<typeof payloadSchema>;
+
 const eventSchema = z
   .object({
-    name: z.string().min(1, 'Event name must be a non-empty string')
+    name: z.string().min(1, 'Event name must be a non-empty string'),
+    payloadSchema
   })
   .strict();
 

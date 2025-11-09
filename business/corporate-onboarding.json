@@ -9,12 +9,55 @@
     { "id": "security", "queue": "security" }
   ],
   "events": [
-    { "name": "EmployeeHired" },
-    { "name": "EmployeeCreated" },
-    { "name": "PayrollAccountCreated" },
-    { "name": "ITAccountCreated" },
-    { "name": "FacilitiesReady" },
-    { "name": "EmployeeActivated" }
+    {
+      "name": "EmployeeHired",
+      "payloadSchema": {
+        "employeeId": "string",
+        "fullName": "string",
+        "department": "string",
+        "startDate": "string"
+      }
+    },
+    {
+      "name": "EmployeeCreated",
+      "payloadSchema": {
+        "employeeId": "string",
+        "email": "string",
+        "department": "string"
+      }
+    },
+    {
+      "name": "PayrollAccountCreated",
+      "payloadSchema": {
+        "employeeId": "string",
+        "payrollAccountId": "string",
+        "salary": "number"
+      }
+    },
+    {
+      "name": "ITAccountCreated",
+      "payloadSchema": {
+        "employeeId": "string",
+        "itAccountId": "string",
+        "email": "string"
+      }
+    },
+    {
+      "name": "FacilitiesReady",
+      "payloadSchema": {
+        "employeeId": "string",
+        "deskId": "string",
+        "building": "string",
+        "floor": "string"
+      }
+    },
+    {
+      "name": "EmployeeActivated",
+      "payloadSchema": {
+        "employeeId": "string",
+        "activationDate": "string"
+      }
+    }
   ],
   "listeners": [
     {

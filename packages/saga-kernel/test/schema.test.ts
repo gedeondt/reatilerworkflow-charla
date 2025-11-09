@@ -24,7 +24,20 @@ function createBaseScenario(): Scenario {
       { id: 'order', queue: 'queue-order' },
       { id: 'payment', queue: 'queue-payment' }
     ],
-    events: [{ name: 'OrderCreated' }, { name: 'PaymentRequested' }],
+    events: [
+      { name: 'OrderCreated', payloadSchema: { orderId: 'string', amount: 'number' } },
+      {
+        name: 'PaymentRequested',
+        payloadSchema: {
+          orderId: 'string',
+          amount: 'number',
+          paymentMethod: {
+            type: 'string',
+            lastFour: 'string'
+          }
+        }
+      }
+    ],
     listeners: [
       {
         id: 'on-order-created',
@@ -67,7 +80,10 @@ describe('scenarioSchema', () => {
   it('rejects duplicate event definitions', () => {
     const duplicatedEvents = {
       ...createBaseScenario(),
-      events: [{ name: 'OrderCreated' }, { name: 'OrderCreated' }]
+      events: [
+        { name: 'OrderCreated', payloadSchema: { orderId: 'string' } },
+        { name: 'OrderCreated', payloadSchema: { orderId: 'string' } }
+      ]
     };
 
     const result = scenarioSchema.safeParse(duplicatedEvents);
@@ -108,5 +124,75 @@ describe('scenarioSchema', () => {
         ])
       );
     }
+  });
+
+  it('rejects events without payload schema definitions', () => {
+    const missingPayload = JSON.parse(JSON.stringify(createBaseScenario())) as {
+      events: Array<Record<string, unknown>>;
+    };
+    delete missingPayload.events[0].payloadSchema;
+
+    const result = scenarioSchema.safeParse(missingPayload);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain('Required');
+    }
+  });
+
+  it('rejects payload schemas with nested objects beyond one level', () => {
+    const invalidPayload = JSON.parse(JSON.stringify(createBaseScenario())) as {
+      events: Array<Record<string, unknown>>;
+    };
+    invalidPayload.events[0].payloadSchema = {
+      orderId: 'string',
+      nested: {
+        inner: {
+          detail: 'string'
+        }
+      }
+    };
+
+    const result = scenarioSchema.safeParse(invalidPayload);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain('Invalid input');
+    }
+  });
+
+  it('rejects payload schemas with arrays of arrays', () => {
+    const invalidPayload = JSON.parse(JSON.stringify(createBaseScenario())) as {
+      events: Array<Record<string, unknown>>;
+    };
+    invalidPayload.events[0].payloadSchema = {
+      orderId: 'string',
+      invalid: [['string']]
+    };
+
+    const result = scenarioSchema.safeParse(invalidPayload);
+
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts payload schemas with arrays of flat objects', () => {
+    const validScenario = JSON.parse(JSON.stringify(createBaseScenario())) as {
+      events: Array<Record<string, unknown>>;
+    };
+    validScenario.events[0].payloadSchema = {
+      orderId: 'string',
+      lines: [
+        {
+          sku: 'string',
+          quantity: 'number'
+        }
+      ]
+    };
+
+    const result = scenarioSchema.safeParse(validScenario);
+
+    expect(result.success).toBe(true);
   });
 });

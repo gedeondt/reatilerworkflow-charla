@@ -251,7 +251,9 @@ describe('POST /scenario/apply', () => {
           name: 'dynamic-saga',
           version: 1,
           domains: [{ id: 'ventas', queue: 'ventas' }],
-          events: [{ name: 'PedidoCreado' }],
+          events: [
+            { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
+          ],
           listeners: [
             {
               id: 'ventas-on-PedidoCreado',
@@ -272,7 +274,9 @@ describe('POST /scenario/apply', () => {
               name: 'dynamic-saga',
               version: 1,
               domains: [{ id: 'ventas', queue: 'ventas' }],
-              events: [{ name: 'PedidoCreado' }],
+              events: [
+                { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
+              ],
               listeners: [
                 {
                   id: 'ventas-on-PedidoCreado',
@@ -356,7 +360,9 @@ describe('GET /scenario-definition', () => {
       name: 'from-draft',
       version: 1,
       domains: [{ id: 'order', queue: 'orders' }],
-      events: [{ name: 'OrderPlaced' }],
+      events: [
+        { name: 'OrderPlaced', payloadSchema: { orderId: 'string' } }
+      ],
       listeners: [
         {
           id: 'order-on-OrderPlaced',
@@ -400,7 +406,9 @@ describe('GET /scenario-bootstrap', () => {
       name: 'dynamic-saga',
       version: 1,
       domains: [{ id: 'ventas', queue: 'ventas' }],
-      events: [{ name: 'PedidoCreado' }],
+      events: [
+        { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
+      ],
       listeners: [
         {
           id: 'ventas-on-PedidoCreado',

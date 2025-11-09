@@ -11,7 +11,7 @@ Cada escenario debe seguir el DSL validado por `@reatiler/saga-kernel`:
 - `domains` (`array`): dominios que participan en la SAGA. Cada dominio incluye:
   - `id`: identificador lógico (por ejemplo, `order`).
   - `queue`: cola de `message-queue` usada para publicar y consumir eventos.
-- `events` (`array`): catálogo de eventos de negocio relevantes. Cada elemento define solo `name`.
+- `events` (`array`): catálogo de eventos de negocio relevantes. Cada elemento define `name` y `payloadSchema`.
 - `listeners` (`array`): reacciones a los eventos declarados.
   - `id`: identificador único del listener.
   - `on`: bloque con el `event` que lo dispara.
@@ -20,7 +20,50 @@ Cada escenario debe seguir el DSL validado por `@reatiler/saga-kernel`:
     - `emit`: publica `event` hacia `toDomain`.
     - `set-state`: marca `domain` con el `status` indicado.
 
-La validación impide duplicados de dominios, eventos o listeners y asegura que todas las referencias sean válidas.【F:packages/saga-kernel/src/schema.ts†L1-L104】
+### `payloadSchema`: contrato de datos de cada evento
+
+Cada evento debe declarar explícitamente la forma de su payload mediante `payloadSchema`. Este contrato es obligatorio en todos los archivos `business/*.json`, ejemplos y artefactos generados automáticamente. Su propósito es documentar el intercambio de datos entre dominios, habilitar validaciones tempranas y mantener consistencia en toda la plataforma.
+
+Reglas clave:
+
+- Tipos primitivos permitidos: `string`, `number`, `boolean`.
+- Arrays permitidos: `string[]`, `number[]`, `boolean[]` o arrays de objetos planos.
+- Objetos planos: un único nivel de propiedades cuyos valores sean tipos primitivos o arrays primitivos.
+- Arrays de objetos: describen un arreglo homogéneo de objetos planos. No se admiten arrays de arrays ni objetos anidados en más de un nivel.
+- Eventos sin datos: deben declarar `payloadSchema: {}`.
+
+Ejemplos:
+
+```jsonc
+{
+  "name": "OrderPlaced",
+  "payloadSchema": {
+    "orderId": "string",
+    "lines": [
+      {
+        "sku": "string",
+        "qty": "number"
+      }
+    ],
+    "amount": "number",
+    "address": {
+      "line1": "string",
+      "city": "string",
+      "zip": "string",
+      "country": "string"
+    }
+  }
+}
+```
+
+```jsonc
+{
+  "name": "InventorySynced",
+  "payloadSchema": {}
+}
+```
+
+La validación impide duplicados de dominios, eventos o listeners, verifica la forma de `payloadSchema` y asegura que todas las referencias sean válidas.【F:packages/saga-kernel/src/schema.ts†L1-L128】
 
 ## Ciclo de vida
 

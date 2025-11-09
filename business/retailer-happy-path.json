@@ -8,12 +8,88 @@
     { "id": "shipping", "queue": "shipping" }
   ],
   "events": [
-    { "name": "OrderPlaced" },
-    { "name": "InventoryReserved" },
-    { "name": "PaymentAuthorized" },
-    { "name": "ShipmentPrepared" },
-    { "name": "PaymentCaptured" },
-    { "name": "OrderConfirmed" }
+    {
+      "name": "OrderPlaced",
+      "payloadSchema": {
+        "orderId": "string",
+        "lines": [
+          {
+            "sku": "string",
+            "qty": "number"
+          }
+        ],
+        "amount": "number",
+        "address": {
+          "line1": "string",
+          "city": "string",
+          "zip": "string",
+          "country": "string"
+        }
+      }
+    },
+    {
+      "name": "InventoryReserved",
+      "payloadSchema": {
+        "reservationId": "string",
+        "orderId": "string",
+        "items": [
+          {
+            "sku": "string",
+            "qty": "number"
+          }
+        ],
+        "amount": "number",
+        "address": {
+          "line1": "string",
+          "city": "string",
+          "zip": "string",
+          "country": "string"
+        }
+      }
+    },
+    {
+      "name": "PaymentAuthorized",
+      "payloadSchema": {
+        "paymentId": "string",
+        "orderId": "string",
+        "reservationId": "string",
+        "amount": "number",
+        "address": {
+          "line1": "string",
+          "city": "string",
+          "zip": "string",
+          "country": "string"
+        }
+      }
+    },
+    {
+      "name": "ShipmentPrepared",
+      "payloadSchema": {
+        "shipmentId": "string",
+        "orderId": "string",
+        "address": {
+          "line1": "string",
+          "city": "string",
+          "zip": "string",
+          "country": "string"
+        }
+      }
+    },
+    {
+      "name": "PaymentCaptured",
+      "payloadSchema": {
+        "paymentId": "string",
+        "orderId": "string",
+        "amount": "number"
+      }
+    },
+    {
+      "name": "OrderConfirmed",
+      "payloadSchema": {
+        "orderId": "string",
+        "status": "string"
+      }
+    }
   ],
   "listeners": [
     {

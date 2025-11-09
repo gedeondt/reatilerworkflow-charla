@@ -25,7 +25,10 @@ describe('scenario runtime', () => {
         { id: 'source', queue: 'queue-source' },
         { id: 'target', queue: 'queue-target' }
       ],
-      events: [{ name: 'Initial' }, { name: 'FollowUp' }],
+      events: [
+        { name: 'Initial', payloadSchema: {} },
+        { name: 'FollowUp', payloadSchema: {} }
+      ],
       listeners: [
         {
           id: 'on-initial',
