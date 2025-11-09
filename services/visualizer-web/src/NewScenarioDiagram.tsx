@@ -1,10 +1,12 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import ReactFlow, {
   Background,
+  Controls,
   type Edge,
   MarkerType,
   type Node,
   ReactFlowProvider,
+  useReactFlow,
 } from "reactflow";
 
 import type { CSSProperties } from "react";
@@ -379,6 +381,52 @@ class DiagramErrorBoundary extends React.Component<
   }
 }
 
+type DiagramCanvasProps = {
+  nodes: Node[];
+  edges: Edge[];
+};
+
+const DiagramCanvas: React.FC<DiagramCanvasProps> = ({ nodes, edges }) => {
+  const { fitView } = useReactFlow();
+
+  useEffect(() => {
+    if (nodes.length === 0) {
+      return;
+    }
+
+    const animationFrame = requestAnimationFrame(() => {
+      try {
+        fitView({ padding: 0.28, includeHiddenNodes: true });
+      } catch (error) {
+        console.error("Failed to fit diagram view", error);
+      }
+    });
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [edges, nodes, fitView]);
+
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      defaultViewport={{ x: -80, y: -60, zoom: 0.85 }}
+      minZoom={0.3}
+      maxZoom={2}
+      nodesDraggable={false}
+      nodesConnectable={false}
+      elementsSelectable={false}
+      zoomOnScroll
+      zoomOnPinch
+      panOnDrag
+      zoomOnDoubleClick={false}
+      proOptions={{ hideAttribution: true }}
+    >
+      <Background gap={16} size={1} color="#27272a" />
+      <Controls position="bottom-right" className="!bg-zinc-900/80 !border-zinc-700 !text-zinc-100" />
+    </ReactFlow>
+  );
+};
+
 const NewScenarioDiagram: React.FC<NewScenarioDiagramProps> = ({ scenarioJson }) => {
   const graph = useMemo<GraphResult>(() => {
     try {
@@ -415,22 +463,7 @@ const NewScenarioDiagram: React.FC<NewScenarioDiagramProps> = ({ scenarioJson })
       <DiagramErrorBoundary>
         <ReactFlowProvider>
           <div className="h-80 w-full border border-zinc-800 rounded bg-zinc-950/80">
-            <ReactFlow
-              nodes={graph.nodes}
-              edges={graph.edges}
-              fitView
-              fitViewOptions={{ padding: 0.2, includeHiddenNodes: true }}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              elementsSelectable={false}
-              zoomOnScroll={false}
-              zoomOnPinch={false}
-              panOnScroll={false}
-              panOnDrag={false}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background gap={16} size={1} color="#27272a" />
-            </ReactFlow>
+            <DiagramCanvas nodes={graph.nodes} edges={graph.edges} />
           </div>
         </ReactFlowProvider>
       </DiagramErrorBoundary>
