@@ -266,6 +266,7 @@ Instrucciones obligatorias:
 - \`payloadSchema\` solo puede usar los tipos primitivos \`string\`, \`number\`, \`boolean\`, sus variantes en array (\`string[]\`, \`number[]\`, \`boolean[]\`) u objetos planos de un nivel. También se admiten arrays de objetos planos. Está prohibido anidar objetos más allá de un nivel o crear arrays de arrays.
 - Utiliza \`payloadSchema: {}\` cuando un evento no requiera datos.
 - Cada listener debe definir "id", "on" (con "event"), opcionalmente "delayMs" y la lista "actions". Las acciones solo pueden ser de tipo "emit" (event, toDomain) o "set-state" (domain, status).
+- Cada acción "emit" debe incluir "mapping" siguiendo el DSL: escalares con alias o {"from"}, constantes con {"const"}, objetos planos con {"map": { ... }} y arrays de objetos con {"arrayFrom": ..., "map": { ... }}. Los arrays de primitivos solo admiten referencias directas.
 - No añadas ninguna propiedad adicional (por ejemplo sagaSummary, openQuestions, subscribesTo, publishes, metadata ni explicaciones).
 - Mantén la coherencia con los dominios y eventos descritos en la propuesta aprobada, adaptando nombres si el flujo lo requiere.
 - Redacta todos los identificadores y estados en español cuando sea pertinente.

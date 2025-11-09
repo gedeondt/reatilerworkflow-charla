@@ -25,7 +25,17 @@ function createBaseScenario(): Scenario {
       { id: 'payment', queue: 'queue-payment' }
     ],
     events: [
-      { name: 'OrderCreated', payloadSchema: { orderId: 'string', amount: 'number' } },
+      {
+        name: 'OrderCreated',
+        payloadSchema: {
+          orderId: 'string',
+          amount: 'number',
+          paymentMethod: {
+            type: 'string',
+            lastFour: 'string'
+          }
+        }
+      },
       {
         name: 'PaymentRequested',
         payloadSchema: {
@@ -44,7 +54,22 @@ function createBaseScenario(): Scenario {
         on: { event: 'OrderCreated' },
         actions: [
           { type: 'set-state', domain: 'order', status: 'CREATED' },
-          { type: 'emit', event: 'PaymentRequested', toDomain: 'payment' }
+          {
+            type: 'emit',
+            event: 'PaymentRequested',
+            toDomain: 'payment',
+            mapping: {
+              orderId: 'orderId',
+              amount: 'amount',
+              paymentMethod: {
+                objectFrom: 'paymentMethod',
+                map: {
+                  type: 'type',
+                  lastFour: 'lastFour'
+                }
+              }
+            }
+          }
         ]
       }
     ]
@@ -104,7 +129,7 @@ describe('scenarioSchema', () => {
           on: { event: 'NonExistingEvent' },
           actions: [
             { type: 'set-state', domain: 'missing-domain', status: 'ANY' },
-            { type: 'emit', event: 'NonExistingEvent', toDomain: 'missing-domain' }
+            { type: 'emit', event: 'NonExistingEvent', toDomain: 'missing-domain', mapping: {} }
           ]
         }
       ]
@@ -183,6 +208,11 @@ describe('scenarioSchema', () => {
     };
     validScenario.events[0].payloadSchema = {
       orderId: 'string',
+      amount: 'number',
+      paymentMethod: {
+        type: 'string',
+        lastFour: 'string'
+      },
       lines: [
         {
           sku: 'string',
@@ -194,5 +224,47 @@ describe('scenarioSchema', () => {
     const result = scenarioSchema.safeParse(validScenario);
 
     expect(result.success).toBe(true);
+  });
+
+  it('rejects emit mappings missing destination fields', () => {
+    const invalidScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+    const emitAction = invalidScenario.listeners[0].actions.find(
+      (action): action is Extract<typeof action, { type: 'emit' }> => action.type === 'emit'
+    );
+
+    if (emitAction) {
+      delete emitAction.mapping.amount;
+    }
+
+    const result = scenarioSchema.safeParse(invalidScenario);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain(
+        'Emit mapping for event "PaymentRequested" is missing definition for field "amount"'
+      );
+    }
+  });
+
+  it('rejects emit mappings referencing unknown source fields', () => {
+    const invalidScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+    const emitAction = invalidScenario.listeners[0].actions.find(
+      (action): action is Extract<typeof action, { type: 'emit' }> => action.type === 'emit'
+    );
+
+    if (emitAction) {
+      emitAction.mapping.orderId = { from: 'unknownOrderId' };
+    }
+
+    const result = scenarioSchema.safeParse(invalidScenario);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain(
+        'Emit mapping for event "PaymentRequested" references unknown field "unknownOrderId" in event "OrderCreated" payload'
+      );
+    }
   });
 });

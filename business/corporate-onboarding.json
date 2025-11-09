@@ -66,8 +66,26 @@
       "on": { "event": "EmployeeHired" },
       "actions": [
         { "type": "set-state", "domain": "hr", "status": "HIRED" },
-        { "type": "emit", "event": "EmployeeCreated", "toDomain": "payroll" },
-        { "type": "emit", "event": "EmployeeCreated", "toDomain": "it" }
+        {
+          "type": "emit",
+          "event": "EmployeeCreated",
+          "toDomain": "payroll",
+          "mapping": {
+            "employeeId": "employeeId",
+            "email": { "const": "employee@corp.example" },
+            "department": "department"
+          }
+        },
+        {
+          "type": "emit",
+          "event": "EmployeeCreated",
+          "toDomain": "it",
+          "mapping": {
+            "employeeId": "employeeId",
+            "email": { "const": "employee@corp.example" },
+            "department": "department"
+          }
+        }
       ]
     },
     {
@@ -76,7 +94,16 @@
       "on": { "event": "EmployeeCreated" },
       "actions": [
         { "type": "set-state", "domain": "payroll", "status": "ACCOUNT_CREATED" },
-        { "type": "emit", "event": "PayrollAccountCreated", "toDomain": "hr" }
+        {
+          "type": "emit",
+          "event": "PayrollAccountCreated",
+          "toDomain": "hr",
+          "mapping": {
+            "employeeId": "employeeId",
+            "payrollAccountId": { "const": "PAYROLL-001" },
+            "salary": { "const": 50000 }
+          }
+        }
       ]
     },
     {
@@ -85,7 +112,16 @@
       "on": { "event": "EmployeeCreated" },
       "actions": [
         { "type": "set-state", "domain": "it", "status": "ACCOUNT_CREATED" },
-        { "type": "emit", "event": "ITAccountCreated", "toDomain": "facilities" }
+        {
+          "type": "emit",
+          "event": "ITAccountCreated",
+          "toDomain": "facilities",
+          "mapping": {
+            "employeeId": "employeeId",
+            "itAccountId": { "const": "IT-001" },
+            "email": "email"
+          }
+        }
       ]
     },
     {
@@ -94,7 +130,17 @@
       "on": { "event": "ITAccountCreated" },
       "actions": [
         { "type": "set-state", "domain": "facilities", "status": "READY" },
-        { "type": "emit", "event": "FacilitiesReady", "toDomain": "security" }
+        {
+          "type": "emit",
+          "event": "FacilitiesReady",
+          "toDomain": "security",
+          "mapping": {
+            "employeeId": "employeeId",
+            "deskId": { "const": "D-101" },
+            "building": { "const": "HQ" },
+            "floor": { "const": "1" }
+          }
+        }
       ]
     },
     {
@@ -103,7 +149,15 @@
       "on": { "event": "FacilitiesReady" },
       "actions": [
         { "type": "set-state", "domain": "security", "status": "ACCESS_GRANTED" },
-        { "type": "emit", "event": "EmployeeActivated", "toDomain": "hr" }
+        {
+          "type": "emit",
+          "event": "EmployeeActivated",
+          "toDomain": "hr",
+          "mapping": {
+            "employeeId": "employeeId",
+            "activationDate": { "const": "2024-01-01" }
+          }
+        }
       ]
     },
     {

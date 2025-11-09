@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 
 import type { EventBus, EventEnvelope } from '@reatiler/shared/event-bus';
 
-import type { Listener, ListenerAction, Scenario } from './schema.js';
+import { applyEmitMapping } from './mapping.js';
+import type { Listener, ListenerAction, Scenario, ScenarioEvent } from './schema.js';
 
 export type Logger = {
   debug: (...args: unknown[]) => void;
   info: (...args: unknown[]) => void;
+  warn: (...args: unknown[]) => void;
   error: (...args: unknown[]) => void;
 };
 
@@ -36,6 +38,9 @@ function delay(ms: number): Promise<void> {
   });
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 export function createScenarioRuntime({
   scenario,
   bus,
@@ -49,11 +54,16 @@ export function createScenarioRuntime({
   }
 
   const listenersByEvent = new Map<string, Listener[]>();
+  const eventsByName = new Map<string, ScenarioEvent>();
 
   for (const listener of scenario.listeners) {
     const listeners = listenersByEvent.get(listener.on.event) ?? [];
     listeners.push(listener);
     listenersByEvent.set(listener.on.event, listeners);
+  }
+
+  for (const event of scenario.events) {
+    eventsByName.set(event.name, event);
   }
 
   const state = new Map<string, Map<string, string>>();
@@ -67,7 +77,11 @@ export function createScenarioRuntime({
     state.set(correlationId, domainState);
   }
 
-  async function executeEmit(action: ListenerAction & { type: 'emit' }, envelope: EventEnvelope): Promise<void> {
+  async function executeEmit(
+    action: ListenerAction & { type: 'emit' },
+    envelope: EventEnvelope,
+    listenerId: string
+  ): Promise<void> {
     const targetQueue = domainQueues.get(action.toDomain);
 
     if (!targetQueue) {
@@ -78,7 +92,37 @@ export function createScenarioRuntime({
       return;
     }
 
+    const destinationEvent = eventsByName.get(action.event);
+
+    if (!destinationEvent) {
+      logger.error(
+        { action: 'emit', event: action.event },
+        `Unable to emit event "${action.event}" because it is not defined in the scenario.`,
+      );
+      return;
+    }
+
     const traceId = envelope.traceId || randomUUID();
+
+    const sourcePayload = isRecord(envelope.data) ? envelope.data : {};
+
+    const mappedPayload = applyEmitMapping({
+      sourcePayload,
+      destinationSchema: destinationEvent.payloadSchema,
+      mapping: action.mapping,
+      warn: ({ message, path }) => {
+        logger.warn(
+          {
+            action: 'emit',
+            event: action.event,
+            listenerId,
+            correlationId: envelope.correlationId,
+            path
+          },
+          message
+        );
+      }
+    });
 
     const emittedEnvelope: EventEnvelope = {
       eventName: action.event,
@@ -88,7 +132,7 @@ export function createScenarioRuntime({
       correlationId: envelope.correlationId,
       occurredAt: new Date().toISOString(),
       causationId: envelope.eventId,
-      data: envelope.data
+      data: mappedPayload
     };
 
     await bus.push(targetQueue, emittedEnvelope);
@@ -104,7 +148,11 @@ export function createScenarioRuntime({
     );
   }
 
-  async function executeAction(action: ListenerAction, envelope: EventEnvelope): Promise<void> {
+  async function executeAction(
+    action: ListenerAction,
+    envelope: EventEnvelope,
+    listenerId: string
+  ): Promise<void> {
     if (action.type === 'set-state') {
       updateState(envelope.correlationId, action.domain, action.status);
 
@@ -118,7 +166,7 @@ export function createScenarioRuntime({
       return;
     }
 
-    await executeEmit(action, envelope);
+    await executeEmit(action, envelope, listenerId);
   }
 
   async function executeListener(listener: Listener, envelope: EventEnvelope): Promise<void> {
@@ -132,7 +180,7 @@ export function createScenarioRuntime({
       }
 
       try {
-        await executeAction(action, envelope);
+        await executeAction(action, envelope, listener.id);
       } catch (error) {
         logger.error(
           { listener: listener.id, action, error },

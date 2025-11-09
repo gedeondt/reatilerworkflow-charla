@@ -67,6 +67,8 @@
       "payloadSchema": {
         "shipmentId": "string",
         "orderId": "string",
+        "paymentId": "string",
+        "amount": "number",
         "address": {
           "line1": "string",
           "city": "string",
@@ -107,7 +109,28 @@
         {
           "type": "emit",
           "event": "InventoryReserved",
-          "toDomain": "inventory"
+          "toDomain": "inventory",
+          "mapping": {
+            "reservationId": { "const": "RES-001" },
+            "orderId": "orderId",
+            "items": {
+              "arrayFrom": "lines",
+              "map": {
+                "sku": "sku",
+                "qty": "qty"
+              }
+            },
+            "amount": "amount",
+            "address": {
+              "map": {
+                "line1": { "from": "line1" },
+                "city": { "from": "city" },
+                "zip": { "from": "zip" },
+                "country": { "from": "country" }
+              },
+              "objectFrom": "address"
+            }
+          }
         }
       ]
     },
@@ -126,7 +149,22 @@
         {
           "type": "emit",
           "event": "PaymentAuthorized",
-          "toDomain": "payments"
+          "toDomain": "payments",
+          "mapping": {
+            "paymentId": { "const": "PAY-001" },
+            "orderId": "orderId",
+            "reservationId": "reservationId",
+            "amount": "amount",
+            "address": {
+              "objectFrom": "address",
+              "map": {
+                "line1": "line1",
+                "city": "city",
+                "zip": "zip",
+                "country": "country"
+              }
+            }
+          }
         }
       ]
     },
@@ -145,7 +183,22 @@
         {
           "type": "emit",
           "event": "ShipmentPrepared",
-          "toDomain": "shipping"
+          "toDomain": "shipping",
+          "mapping": {
+            "shipmentId": { "const": "SHIP-001" },
+            "orderId": "orderId",
+            "paymentId": "paymentId",
+            "amount": "amount",
+            "address": {
+              "objectFrom": "address",
+              "map": {
+                "line1": "line1",
+                "city": "city",
+                "zip": "zip",
+                "country": "country"
+              }
+            }
+          }
         }
       ]
     },
@@ -164,7 +217,12 @@
         {
           "type": "emit",
           "event": "PaymentCaptured",
-          "toDomain": "order"
+          "toDomain": "order",
+          "mapping": {
+            "paymentId": "paymentId",
+            "orderId": "orderId",
+            "amount": "amount"
+          }
         }
       ]
     },
@@ -183,7 +241,11 @@
         {
           "type": "emit",
           "event": "OrderConfirmed",
-          "toDomain": "order"
+          "toDomain": "order",
+          "mapping": {
+            "orderId": "orderId",
+            "status": { "const": "CONFIRMED" }
+          }
         }
       ]
     }

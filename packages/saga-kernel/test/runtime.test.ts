@@ -26,8 +26,8 @@ describe('scenario runtime', () => {
         { id: 'target', queue: 'queue-target' }
       ],
       events: [
-        { name: 'Initial', payloadSchema: {} },
-        { name: 'FollowUp', payloadSchema: {} }
+        { name: 'Initial', payloadSchema: { orderId: 'string', amount: 'number' } },
+        { name: 'FollowUp', payloadSchema: { orderId: 'string', amount: 'number', status: 'string' } }
       ],
       listeners: [
         {
@@ -36,7 +36,16 @@ describe('scenario runtime', () => {
           delayMs: 50,
           actions: [
             { type: 'set-state', domain: 'source', status: 'PROCESSED' },
-            { type: 'emit', event: 'FollowUp', toDomain: 'target' }
+            {
+              type: 'emit',
+              event: 'FollowUp',
+              toDomain: 'target',
+              mapping: {
+                orderId: 'orderId',
+                amount: 'amount',
+                status: { const: 'PROCESSED' }
+              }
+            }
           ]
         }
       ]
@@ -46,6 +55,7 @@ describe('scenario runtime', () => {
     const logger: Logger = {
       debug: vi.fn(),
       info: vi.fn(),
+      warn: vi.fn(),
       error: vi.fn()
     };
 
@@ -64,7 +74,7 @@ describe('scenario runtime', () => {
       traceId: randomUUID(),
       correlationId,
       occurredAt: new Date().toISOString(),
-      data: { example: 'payload' }
+      data: { orderId: 'ORD-1', amount: 42 }
     };
 
     await runtime.start();
@@ -84,7 +94,11 @@ describe('scenario runtime', () => {
     expect(emitted.envelope.correlationId).toBe(correlationId);
     expect(emitted.envelope.causationId).toBe(initialEnvelope.eventId);
     expect(emitted.envelope.traceId).toBe(initialEnvelope.traceId);
-    expect(emitted.envelope.data).toEqual(initialEnvelope.data);
+    expect(emitted.envelope.data).toEqual({
+      orderId: 'ORD-1',
+      amount: 42,
+      status: 'PROCESSED'
+    });
 
     const elapsed = emitted.timestamp - startTime;
     expect(elapsed).toBeGreaterThanOrEqual(50);

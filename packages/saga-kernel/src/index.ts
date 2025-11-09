@@ -3,8 +3,14 @@ export type {
   Domain,
   ScenarioEvent,
   PayloadSchema,
+  PayloadPrimitive,
   Listener,
-  ListenerAction
+  ListenerAction,
+  ScalarValue,
+  ScalarMapping,
+  ObjectMapping,
+  ArrayObjectMapping,
+  EmitMapping
 } from './schema.js';
 export { scenarioSchema } from './schema.js';
 
@@ -12,3 +18,4 @@ export { loadScenario } from './loader.js';
 
 export type { ScenarioRuntime, ScenarioRuntimeOptions, Logger } from './runtime.js';
 export { createScenarioRuntime } from './runtime.js';
+export { applyEmitMapping } from './mapping.js';

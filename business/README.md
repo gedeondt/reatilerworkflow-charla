@@ -63,7 +63,21 @@ Ejemplos:
 }
 ```
 
-La validación impide duplicados de dominios, eventos o listeners, verifica la forma de `payloadSchema` y asegura que todas las referencias sean válidas.【F:packages/saga-kernel/src/schema.ts†L1-L128】
+La validación impide duplicados de dominios, eventos o listeners, verifica la forma de `payloadSchema` y asegura que todas las referencias sean válidas.【F:packages/saga-kernel/src/schema.ts†L1-L420】
+
+### `mapping` en acciones `emit`
+
+Todas las acciones `emit` deben declarar un bloque `mapping` para construir el payload del evento emitido. El DSL comprueba que cada campo del evento destino esté definido y que los orígenes existan, mientras que el runtime aplica la transformación para encadenar los datos.【F:packages/saga-kernel/src/schema.ts†L200-L420】【F:packages/saga-kernel/src/runtime.ts†L60-L180】
+
+Reglas clave:
+
+- Campos escalares: alias directo (`"campo": "campoOrigen"`), `{ "from": "campo" }` o constantes `{ "const": valor }`.
+- Objetos planos: `{ "map": { ... } }` con opcional `objectFrom` para señalar el origen.
+- Arrays de objetos planos: `{ "arrayFrom": "campoArray", "map": { ... } }`.
+- Arrays de primitivos: solo admiten `from` o alias directo; no se permiten constantes.
+- Las constantes solo se aplican a campos escalares, incluidos los que viven dentro de objetos o arrays de objetos.
+
+El escenario `retailer-happy-path` muestra cómo propagar identificadores, importes y direcciones con estas reglas en cada salto de la SAGA.【F:business/retailer-happy-path.json†L94-L220】【F:packages/saga-kernel/src/mapping.ts†L1-L220】
 
 ## Ciclo de vida
 
