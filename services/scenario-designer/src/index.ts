@@ -262,7 +262,9 @@ ${scenarioDslReferenceString}
 Instrucciones obligatorias:
 - El objeto raíz debe incluir exactamente las propiedades name, version, domains, events y listeners.
 - Cada dominio debe tener exclusivamente los campos "id" y "queue".
-- Cada evento debe contener únicamente el campo "name".
+- Cada evento debe definir "name" y "payloadSchema".
+- \`payloadSchema\` solo puede usar los tipos primitivos \`string\`, \`number\`, \`boolean\`, sus variantes en array (\`string[]\`, \`number[]\`, \`boolean[]\`) u objetos planos de un nivel. También se admiten arrays de objetos planos. Está prohibido anidar objetos más allá de un nivel o crear arrays de arrays.
+- Utiliza \`payloadSchema: {}\` cuando un evento no requiera datos.
 - Cada listener debe definir "id", "on" (con "event"), opcionalmente "delayMs" y la lista "actions". Las acciones solo pueden ser de tipo "emit" (event, toDomain) o "set-state" (domain, status).
 - No añadas ninguna propiedad adicional (por ejemplo sagaSummary, openQuestions, subscribesTo, publishes, metadata ni explicaciones).
 - Mantén la coherencia con los dominios y eventos descritos en la propuesta aprobada, adaptando nombres si el flujo lo requiere.
@@ -308,6 +310,7 @@ Requisitos clave:
 - Usa un eventName coherente con los eventos definidos en el escenario.
 - Completa version, eventId, traceId, correlationId y occurredAt con ejemplos plausibles.
 - Incluye en data únicamente los campos imprescindibles para que la historia del escenario tenga sentido.
+- Asegúrate de que los campos del objeto data respeten el \`payloadSchema\` definido para ese evento.
 - No añadas explicaciones ni texto fuera del JSON.
 
 Escenario de referencia:

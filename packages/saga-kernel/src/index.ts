@@ -2,6 +2,7 @@ export type {
   Scenario,
   Domain,
   ScenarioEvent,
+  PayloadSchema,
   Listener,
   ListenerAction
 } from './schema.js';

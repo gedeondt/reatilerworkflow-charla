@@ -1,6 +1,6 @@
 # Orquestación principal del Reatiler Workflow
 
-El monorepo modela una SAGA retail completamente declarativa. Los escenarios bajo `business/` describen dominios, eventos y listeners que el runtime ejecuta sin lógica adicional. Esta sección resume el comportamiento de referencia y cómo interactúan los servicios para ofrecer simulaciones de extremo a extremo.【F:business/retailer-happy-path.json†L1-L78】【F:services/scenario-runner/src/index.ts†L400-L520】
+El monorepo modela una SAGA retail completamente declarativa. Los escenarios bajo `business/` describen dominios, eventos y listeners que el runtime ejecuta sin lógica adicional. Esta sección resume el comportamiento de referencia y cómo interactúan los servicios para ofrecer simulaciones de extremo a extremo.【F:business/retailer-happy-path.json†L1-L132】【F:services/scenario-runner/src/index.ts†L400-L520】
 
 ## Dominios y colas estándar
 
@@ -13,7 +13,13 @@ El escenario `retailer-happy-path.json` define cuatro dominios conectados a las 
 | `payments` | `payments` | Autorización y captura de cobros. |
 | `shipping` | `shipping` | Preparación y despacho de envíos. |
 
-Puedes añadir dominios adicionales según el flujo que quieras simular, siempre respetando el esquema del DSL.【F:packages/saga-kernel/src/schema.ts†L1-L104】
+Puedes añadir dominios adicionales según el flujo que quieras simular, siempre respetando el esquema del DSL.【F:packages/saga-kernel/src/schema.ts†L1-L128】
+
+## Contrato de eventos (`payloadSchema`)
+
+Cada evento incluye `payloadSchema`, que funciona como contrato de datos entre dominios. Admite tipos primitivos (`string`, `number`, `boolean`), arrays de primitivos (`string[]`, `number[]`, `boolean[]`), objetos planos de un solo nivel y arrays de objetos planos. No se permiten anidaciones adicionales ni arrays de arrays. Si un evento no requiere datos, se define `payloadSchema: {}`.【F:business/retailer-happy-path.json†L10-L92】【F:packages/saga-kernel/src/schema.ts†L1-L128】
+
+En el escenario base, `OrderPlaced` describe identificadores, monto, dirección y líneas del pedido mediante `payloadSchema`, mientras que `OrderConfirmed` solo necesita el identificador y el estado final.【F:business/retailer-happy-path.json†L12-L91】
 
 ## Flujo SAGA (happy path)
 
@@ -42,7 +48,7 @@ sequenceDiagram
     SR-->>C: OrderConfirmed (evento final reflejado en visualizer)
 ```
 
-Cada listener puede declarar un `delayMs` para simular tiempos de procesamiento y emite eventos hacia otros dominios utilizando acciones `emit`. Las acciones `set-state` actualizan el estado visible por `visualizer-api`, el CLI y la interfaz web.【F:business/retailer-happy-path.json†L1-L78】
+Cada listener puede declarar un `delayMs` para simular tiempos de procesamiento y emite eventos hacia otros dominios utilizando acciones `emit`. Las acciones `set-state` actualizan el estado visible por `visualizer-api`, el CLI y la interfaz web.【F:business/retailer-happy-path.json†L94-L160】
 
 ## Escenarios alternativos y compensaciones
 
