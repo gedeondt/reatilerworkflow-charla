@@ -2,22 +2,36 @@ import { spawn } from "node:child_process";
 
 const scenario = process.env.SCENARIO_NAME || "retailer-happy-path";
 
-function run(name, cmd, args = [], env = {}) {
-  const child = spawn(cmd, args, {
+function run(name, cmd, args = [], opts = {}) {
+  const { env: customEnv, ...restOpts } = opts;
+  const proc = spawn(cmd, args, {
     stdio: "inherit",
-    env: { ...process.env, ...env },
+    env: { ...process.env, ...customEnv },
+    ...restOpts,
   });
-  child.on("exit", (code) => {
-    console.log(`\n[${name}] exited with code ${code}\n`);
+
+  proc.on("exit", (code) => {
+    if (code !== 0) {
+      console.error(`❌ [${name}] exited with code ${code}`);
+      process.exitCode = 1;
+    }
   });
-  return child;
+
+  proc.on("error", (err) => {
+    console.error(`💥 [${name}] failed to start:`, err);
+  });
+
+  return proc;
 }
 
 // --- servicios base ---
 run("queue", "pnpm", ["-F", "message-queue", "dev"]);
-run("runner", "pnpm", ["-F", "scenario-runner", "dev"], {
-  SCENARIO_NAME: scenario,
-});
+run(
+  "runner",
+  "pnpm",
+  ["-F", "scenario-runner", "dev"],
+  { env: { SCENARIO_NAME: scenario } },
+);
 
 // --- nuevas piezas ---
 run("state-store", "pnpm", ["-F", "@reatiler/state-store", "dev"]);
@@ -25,9 +39,7 @@ run(
   "visualizer-api",
   "pnpm",
   ["-F", "@reatiler/visualizer-api", "dev"],
-  {
-    SCENARIO_DESIGNER_BASE: "http://localhost:3201",
-  },
+  { env: { SCENARIO_DESIGNER_BASE: "http://localhost:3201" } },
 );
 run("scenario-designer", "pnpm", ["-F", "@reatiler/scenario-designer", "dev"]);
 
