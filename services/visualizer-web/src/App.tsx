@@ -954,7 +954,7 @@ function buildBootstrapCurl(
 
   return [
     `curl -X POST ${baseUrl}/queues/${queuePath}/messages \\`,
-    '  -H "Content-Type: application/json" \',
+    `  -H "Content-Type: application/json" \\`,
     `  -d '${serializedEvent}'`,
   ].join("\n");
 }
