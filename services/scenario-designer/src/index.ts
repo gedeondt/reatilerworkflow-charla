@@ -188,7 +188,8 @@ const extractModelResponse = (content: string | null | undefined): ModelDraftRes
   return validation.data;
 };
 
-const initialPrompt = (description: string): string => `Eres un asistente especializado en diseñar borradores estructurados de escenarios retail para un equipo de ingeniería.
+const initialPrompt = (description: string): string =>
+  `Eres un asistente especializado en diseñar borradores estructurados de escenarios retail para un equipo de ingeniería.
 
 Lee la descripción proporcionada por la persona usuaria y genera un borrador organizado sin ejecutar acciones.
 
@@ -220,13 +221,14 @@ Devuelve un objeto JSON con la estructura:
 Descripción proporcionada por la persona usuaria:
 """
 ${description}
-"""`;
+"""`.trim();
 
 const refinementPrompt = (
   description: string,
   currentProposal: ScenarioProposal,
   feedback: string,
-): string => `Anteriormente propusiste el siguiente borrador de escenario para un flujo retail:
+): string =>
+  `Anteriormente propusiste el siguiente borrador de escenario para un flujo retail:
 ${JSON.stringify(currentProposal, null, 2)}
 
 La descripción original de la persona usuaria fue:
@@ -247,28 +249,33 @@ Sigue estas instrucciones con cuidado:
 - Ajusta dominios, eventos, sagaSummary y openQuestions para reflejar el feedback sin perder los aciertos previos.
 - Mantén los eventos en orden cronológico y asegúrate de que cada uno incluya title y description.
 - Responde únicamente con JSON en la misma estructura anterior, incluyendo un modelNote conciso que resuma los cambios.
-- No generes JSON final para sistemas posteriores ni menciones la activación del escenario.`;
+- No generes JSON final para sistemas posteriores ni menciones la activación del escenario.`.trim();
 
 const scenarioJsonPrompt = (draft: ScenarioDraft, language: ScenarioLanguage): string => {
   const proposalSummary = JSON.stringify(draft.currentProposal, null, 2);
 
-  return [
-    'Genera la definición ejecutable del escenario retail en formato JSON.',
-    'Debes respetar estrictamente el DSL utilizado por nuestro runner. Usa únicamente las claves y estructuras que aparecen en el siguiente ejemplo real, ajustando los valores según la propuesta actual:',
-    scenarioDslReferenceString,
-    'Instrucciones obligatorias:',
-    '- El objeto raíz debe incluir exactamente las propiedades name, version, domains, events y listeners.',
-    '- Cada dominio debe tener exclusivamente los campos "id" y "queue".',
-    '- Cada evento debe contener únicamente el campo "name".',
-    '- Cada listener debe definir "id", "on" (con "event"), opcionalmente "delayMs" y la lista "actions". Las acciones solo pueden ser de tipo "emit" (event, toDomain) o "set-state" (domain, status).',
-    '- No añadas ninguna propiedad adicional (por ejemplo sagaSummary, openQuestions, subscribesTo, publishes, metadata ni explicaciones).',
-    '- Mantén la coherencia con los dominios y eventos descritos en la propuesta aprobada, adaptando nombres si el flujo lo requiere.',
-    '- Redacta todos los identificadores y estados en español cuando sea pertinente.',
-    '- Devuelve únicamente el JSON final sin comentarios ni texto adicional.',
-    `Descripción inicial del reto:\n${draft.inputDescription}`,
-    `Propuesta actual aprobada:\n${proposalSummary}`,
-    `Idioma objetivo para cualquier texto descriptivo: ${language}.`,
-  ].join('\n\n');
+  return `Genera la definición ejecutable del escenario retail en formato JSON.
+
+Debes respetar estrictamente el DSL utilizado por nuestro runner. Usa únicamente las claves y estructuras que aparecen en el siguiente ejemplo real, ajustando los valores según la propuesta actual:
+${scenarioDslReferenceString}
+
+Instrucciones obligatorias:
+- El objeto raíz debe incluir exactamente las propiedades name, version, domains, events y listeners.
+- Cada dominio debe tener exclusivamente los campos "id" y "queue".
+- Cada evento debe contener únicamente el campo "name".
+- Cada listener debe definir "id", "on" (con "event"), opcionalmente "delayMs" y la lista "actions". Las acciones solo pueden ser de tipo "emit" (event, toDomain) o "set-state" (domain, status).
+- No añadas ninguna propiedad adicional (por ejemplo sagaSummary, openQuestions, subscribesTo, publishes, metadata ni explicaciones).
+- Mantén la coherencia con los dominios y eventos descritos en la propuesta aprobada, adaptando nombres si el flujo lo requiere.
+- Redacta todos los identificadores y estados en español cuando sea pertinente.
+- Devuelve únicamente el JSON final sin comentarios ni texto adicional.
+
+Descripción inicial del reto:
+${draft.inputDescription}
+
+Propuesta actual aprobada:
+${proposalSummary}
+
+Idioma objetivo para cualquier texto descriptivo: ${language}.`.trim();
 };
 
 const requestOpenAIContent = async (
@@ -280,30 +287,31 @@ const requestOpenAIContent = async (
 const scenarioBootstrapPrompt = (scenario: Scenario): string => {
   const scenarioJson = JSON.stringify(scenario, null, 2);
 
-  return [
-    'Analiza el escenario descrito a continuación y prepara un único evento inicial para arrancar la SAGA.',
-    'Responde exclusivamente con un objeto JSON que siga esta estructura exacta:',
-    '{
-      "queue": "nombre-cola",
-      "event": {
-        "eventName": "...",
-        "version": 1,
-        "eventId": "evt-1",
-        "traceId": "trace-1",
-        "correlationId": "saga-1",
-        "occurredAt": "2025-01-01T00:00:00.000Z",
-        "data": { }
-      }
-    }',
-    'Requisitos clave:',
-    '- Selecciona una cola (queue) que exista dentro de los dominios del escenario.',
-    '- Usa un eventName coherente con los eventos definidos en el escenario.',
-    '- Completa version, eventId, traceId, correlationId y occurredAt con ejemplos plausibles.',
-    '- Incluye en data únicamente los campos imprescindibles para que la historia del escenario tenga sentido.',
-    '- No añadas explicaciones ni texto fuera del JSON.',
-    'Escenario de referencia:',
-    scenarioJson,
-  ].join('\n\n');
+  return `Analiza el escenario descrito a continuación y prepara un único evento inicial para arrancar la SAGA.
+
+Responde exclusivamente con un objeto JSON que siga esta estructura exacta:
+{
+  "queue": "nombre-cola",
+  "event": {
+    "eventName": "...",
+    "version": 1,
+    "eventId": "evt-1",
+    "traceId": "trace-1",
+    "correlationId": "saga-1",
+    "occurredAt": "2025-01-01T00:00:00.000Z",
+    "data": { }
+  }
+}
+
+Requisitos clave:
+- Selecciona una cola (queue) que exista dentro de los dominios del escenario.
+- Usa un eventName coherente con los eventos definidos en el escenario.
+- Completa version, eventId, traceId, correlationId y occurredAt con ejemplos plausibles.
+- Incluye en data únicamente los campos imprescindibles para que la historia del escenario tenga sentido.
+- No añadas explicaciones ni texto fuera del JSON.
+
+Escenario de referencia:
+${scenarioJson}`.trim();
 };
 
 const generateScenarioBootstrapExample = async (
