@@ -292,22 +292,26 @@ const appendLogEntry = (entry: LogEntry) => {
 
 const getLogEntries = (): LogEntry[] => [...logBuffer];
 
-const app = Fastify({ logger: true });
+const isRoutineVisualizerPath = (path: string): boolean =>
+  path === '/scenario' || path.startsWith('/logs') || path.startsWith('/traces');
+
+const app = Fastify({ logger: true, disableRequestLogging: true });
 
 app.addHook('onResponse', (request, reply, done) => {
-  const [path] = request.url.split('?');
-  const isRoutineRoute =
-    path === '/traces' ||
-    path === '/logs' ||
-    path === '/scenario' ||
-    path.startsWith('/kv/');
+  const rawUrl = request.raw.url ?? request.url ?? '';
+  const path = rawUrl.split('?')[0] ?? rawUrl;
 
-  if (isRoutineRoute) {
-    done();
-    return;
+  if (!isRoutineVisualizerPath(path)) {
+    request.log.info(
+      {
+        method: request.method,
+        url: path,
+        statusCode: reply.statusCode,
+      },
+      'request completed',
+    );
   }
 
-  request.log.info({ url: request.url, statusCode: reply.statusCode }, 'handled');
   done();
 });
 

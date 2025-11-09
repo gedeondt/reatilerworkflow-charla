@@ -6,6 +6,7 @@ import type {
   ApplyScenarioResponse,
   DraftSummary,
   MarkReadyResponse,
+  DraftCreationResponse,
 } from "./types";
 
 const API_BASE =
@@ -116,6 +117,22 @@ export async function applyScenarioDraft(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "draft", draftId }),
+  });
+
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res));
+  }
+
+  return res.json();
+}
+
+export async function createScenarioDraft(
+  description: string,
+): Promise<DraftCreationResponse> {
+  const res = await fetch(`${DESIGNER_BASE}/scenario-drafts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ description }),
   });
 
   if (!res.ok) {

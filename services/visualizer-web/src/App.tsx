@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   applyScenarioByName,
   applyScenarioDraft,
+  createScenarioDraft,
   fetchDraftSummary,
   fetchLogs,
   fetchScenario,
@@ -9,7 +10,13 @@ import {
   fetchTraces,
   markDraftReady,
 } from "./api";
-import type { DraftSummary, LogEntry, ScenarioListItem, TraceView } from "./types";
+import type {
+  DraftCreationResponse,
+  DraftSummary,
+  LogEntry,
+  ScenarioListItem,
+  TraceView,
+} from "./types";
 
 const defaultScenario =
   import.meta.env.VITE_SCENARIO_NAME || "retailer-happy-path";
@@ -36,6 +43,12 @@ export default function App() {
   const [isDraftLoading, setIsDraftLoading] = useState<boolean>(false);
   const [isMarkingReady, setIsMarkingReady] = useState<boolean>(false);
   const [isApplyingDraft, setIsApplyingDraft] = useState<boolean>(false);
+  const [draftDescription, setDraftDescription] = useState<string>("");
+  const [createDraftError, setCreateDraftError] = useState<string | null>(null);
+  const [isCreatingDraft, setIsCreatingDraft] = useState<boolean>(false);
+  const [createdDraft, setCreatedDraft] = useState<DraftCreationResponse | null>(
+    null,
+  );
 
   useEffect(() => {
     const tick = () => setNow(new Date().toLocaleTimeString());
@@ -260,6 +273,38 @@ export default function App() {
     setDraftIdInput(event.target.value);
   };
 
+  const handleDraftDescriptionChange = (
+    event: React.ChangeEvent<HTMLTextAreaElement>,
+  ) => {
+    setDraftDescription(event.target.value);
+  };
+
+  const handleCreateDraft = async () => {
+    if (!draftDescription.trim()) {
+      setCreateDraftError("introduce una descripción antes de continuar");
+      return;
+    }
+
+    setCreateDraftError(null);
+    setDraftError(null);
+    setIsCreatingDraft(true);
+
+    try {
+      const draft = await createScenarioDraft(draftDescription);
+      setCreatedDraft(draft);
+      setDraftIdInput(draft.id);
+      setDraftSummary(null);
+    } catch (error) {
+      console.warn("Failed to create scenario draft", error);
+      setCreateDraftError(
+        "No se pudo generar el draft. Asegúrate de que scenario-designer está levantado y tiene OPENAI_API_KEY configurada.",
+      );
+      return;
+    } finally {
+      setIsCreatingDraft(false);
+    }
+  };
+
   const handleLoadDraftSummary = async (
     event: React.FormEvent<HTMLFormElement>,
   ) => {
@@ -448,7 +493,67 @@ export default function App() {
   );
 
   const draftPanel = (
-    <div className="w-full border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-300 space-y-2">
+    <div className="w-full border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-300 space-y-3">
+      <div className="space-y-2">
+        <div className="uppercase tracking-wide text-zinc-500">nuevo escenario</div>
+        <textarea
+          value={draftDescription}
+          onChange={handleDraftDescriptionChange}
+          placeholder="Describe un nuevo flujo o proceso para crear un escenario…"
+          className="w-full min-h-[96px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
+        />
+        <p className="text-zinc-500 text-[10px]">
+          Usa frases en castellano. Te propondremos dominios y eventos.
+        </p>
+        <button
+          type="button"
+          onClick={handleCreateDraft}
+          disabled={isCreatingDraft}
+          className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isCreatingDraft
+            ? "generando propuesta inicial…"
+            : createdDraft
+              ? "propuesta generada"
+              : "crear draft"}
+        </button>
+        {createDraftError ? (
+          <div className="text-red-400">{createDraftError}</div>
+        ) : null}
+        {createdDraft ? (
+          <div className="border border-zinc-800 rounded px-3 py-2 bg-zinc-900 space-y-1">
+            <div>
+              <span className="text-zinc-500">Draft creado:</span>{" "}
+              <span className="text-green-400">{createdDraft.id}</span>
+            </div>
+            <div>
+              <span className="text-zinc-500">Dominios sugeridos:</span>{" "}
+              <span className="text-zinc-300">
+                {createdDraft.currentProposal.domains.length > 0
+                  ? createdDraft.currentProposal.domains.join(", ")
+                  : "—"}
+              </span>
+            </div>
+            <div className="space-y-1">
+              <div className="text-zinc-500">Eventos clave:</div>
+              {createdDraft.currentProposal.events.length > 0 ? (
+                <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
+                  {createdDraft.currentProposal.events.map((event, index) => (
+                    <li key={`${createdDraft.id}-event-${index}`}>
+                      <span className="text-green-400">{event.title}</span>
+                      {event.description ? (
+                        <span className="text-zinc-500"> — {event.description}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-zinc-500">—</div>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </div>
       <form
         onSubmit={handleLoadDraftSummary}
         className="flex flex-wrap items-center gap-2"
