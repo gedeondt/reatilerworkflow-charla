@@ -5,6 +5,7 @@ import { dirname, extname, join } from 'node:path';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
+import { z } from 'zod';
 
 type TraceEvent = {
   eventName: string;
@@ -57,6 +58,17 @@ const ERROR_DELAY_MS = 1000;
 const LOG_BUFFER_SIZE = 200;
 
 const BUSINESS_DIR_NAME = 'business';
+const SCENARIO_DESIGNER_BASE =
+  process.env.SCENARIO_DESIGNER_BASE ?? 'http://localhost:3400';
+
+type ScenarioSource = 'business' | 'draft';
+
+type DynamicScenarioRecord = {
+  name: string;
+  definition: Record<string, unknown>;
+  origin: { type: 'draft'; draftId: string };
+  appliedAt: string;
+};
 
 const logBuffer: LogEntry[] = [];
 
@@ -64,17 +76,211 @@ const resetLogBuffer = () => {
   logBuffer.splice(0, logBuffer.length);
 };
 
-let activeScenarioName = DEFAULT_SCENARIO;
+const dynamicScenarios = new Map<string, DynamicScenarioRecord>();
 
-const getActiveScenarioName = (): string => activeScenarioName;
+type ActiveScenarioState = { name: string; source: ScenarioSource };
 
-const setActiveScenarioName = (name: string): void => {
-  if (activeScenarioName === name) {
+let activeScenario: ActiveScenarioState = { name: DEFAULT_SCENARIO, source: 'business' };
+
+const getActiveScenario = (): ActiveScenarioState => activeScenario;
+
+const getActiveScenarioName = (): string => activeScenario.name;
+
+const setActiveScenario = (name: string, source: ScenarioSource): void => {
+  if (activeScenario.name === name && activeScenario.source === source) {
     return;
   }
 
-  activeScenarioName = name;
+  activeScenario = { name, source };
   resetLogBuffer();
+};
+
+const getScenarioSource = (name: string): ScenarioSource =>
+  dynamicScenarios.has(name) ? 'draft' : 'business';
+
+const registerDynamicScenario = (record: DynamicScenarioRecord) => {
+  dynamicScenarios.set(record.name, record);
+};
+
+const listDynamicScenarios = () => Array.from(dynamicScenarios.values());
+
+const clearDynamicScenarios = () => dynamicScenarios.clear();
+
+const listScenarioItems = async (): Promise<
+  Array<{ name: string; source: ScenarioSource }>
+> => {
+  const items = new Map<string, ScenarioSource>();
+  const businessNames = await listBusinessScenarioNames();
+
+  for (const name of businessNames) {
+    items.set(name, 'business');
+  }
+
+  for (const record of listDynamicScenarios()) {
+    items.set(record.name, 'draft');
+  }
+
+  return Array.from(items.entries())
+    .map(([name, source]) => ({ name, source }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+};
+
+class HttpError extends Error {
+  status: number;
+  payload: Record<string, unknown>;
+
+  constructor(status: number, payload: Record<string, unknown>) {
+    super(typeof payload.message === 'string' ? payload.message : '');
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
+const DraftSummarySchema = z
+  .object({
+    id: z.string(),
+    status: z.union([z.literal('draft'), z.literal('ready')]).default('draft'),
+    currentProposal: z.object({}).passthrough(),
+    hasGeneratedScenario: z.boolean(),
+    generatedScenarioPreview: z.unknown().optional(),
+    guidance: z.string().optional(),
+  })
+  .passthrough();
+
+type DraftSummary = z.infer<typeof DraftSummarySchema>;
+
+const ScenarioDefinitionSchema = z
+  .object({
+    name: z.string().min(1),
+  })
+  .passthrough();
+
+type ScenarioDefinition = z.infer<typeof ScenarioDefinitionSchema>;
+
+const applyScenarioBodySchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('existing'),
+    name: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal('draft'),
+    draftId: z.string().min(1),
+  }),
+]);
+
+const ensureScenarioExists = async (name: string): Promise<ScenarioSource> => {
+  if (dynamicScenarios.has(name)) {
+    return 'draft';
+  }
+
+  let available: string[];
+
+  try {
+    available = await listBusinessScenarioNames();
+  } catch (error) {
+    throw new HttpError(500, {
+      error: 'list_scenarios_failed',
+      message: 'Unable to list available scenarios.',
+      cause: error instanceof Error ? error.message : error,
+    });
+  }
+
+  if (available.includes(name)) {
+    return 'business';
+  }
+
+  throw new HttpError(400, {
+    error: 'unknown_scenario',
+    message: `Scenario "${name}" is not registered.`,
+  });
+};
+
+const fetchDraftSummary = async (draftId: string): Promise<DraftSummary> => {
+  const url = `${SCENARIO_DESIGNER_BASE}/scenario-drafts/${encodeURIComponent(draftId)}/summary`;
+
+  try {
+    const response = await axios.get(url, { validateStatus: () => true });
+
+    if (response.status === 404) {
+      throw new HttpError(404, {
+        error: 'draft_not_found',
+        message: `Draft "${draftId}" was not found in scenario-designer.`,
+      });
+    }
+
+    if (response.status >= 400) {
+      throw new HttpError(response.status, {
+        error: 'designer_error',
+        message: 'scenario-designer returned an error for the requested draft.',
+      });
+    }
+
+    const parsed = DraftSummarySchema.safeParse(response.data);
+
+    if (!parsed.success) {
+      throw new HttpError(502, {
+        error: 'invalid_draft_summary',
+        message: 'scenario-designer returned an invalid draft summary.',
+      });
+    }
+
+    return parsed.data;
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+
+    throw new HttpError(502, {
+      error: 'designer_unreachable',
+      message: 'Failed to contact scenario-designer.',
+      cause: error instanceof Error ? error.message : error,
+    });
+  }
+};
+
+const fetchDraftScenarioDefinition = async (
+  draftId: string,
+): Promise<ScenarioDefinition> => {
+  const url = `${SCENARIO_DESIGNER_BASE}/scenario-drafts/${encodeURIComponent(draftId)}/json`;
+
+  try {
+    const response = await axios.get(url, { validateStatus: () => true });
+
+    if (response.status === 404) {
+      throw new HttpError(404, {
+        error: 'generated_scenario_not_found',
+        message: 'Generated scenario JSON not found for this draft.',
+      });
+    }
+
+    if (response.status >= 400) {
+      throw new HttpError(response.status, {
+        error: 'designer_error',
+        message: 'scenario-designer failed to return the generated scenario.',
+      });
+    }
+
+    const parsed = ScenarioDefinitionSchema.safeParse(response.data);
+
+    if (!parsed.success) {
+      throw new HttpError(502, {
+        error: 'invalid_scenario_definition',
+        message: 'Generated scenario JSON is invalid.',
+      });
+    }
+
+    return parsed.data;
+  } catch (error) {
+    if (error instanceof HttpError) {
+      throw error;
+    }
+
+    throw new HttpError(502, {
+      error: 'designer_unreachable',
+      message: 'Failed to retrieve the generated scenario JSON.',
+      cause: error instanceof Error ? error.message : error,
+    });
+  }
 };
 
 const appendLogEntry = (entry: LogEntry) => {
@@ -138,7 +344,7 @@ const findBusinessDirectory = (startDir: string): string | null => {
   return null;
 };
 
-const listScenarioNames = async (): Promise<string[]> => {
+const listBusinessScenarioNames = async (): Promise<string[]> => {
   const businessDir = findBusinessDirectory(process.cwd());
 
   if (!businessDir) {
@@ -158,16 +364,117 @@ await app.register(cors, { origin: true });
 app.get('/health', async () => ({ ok: true }));
 
 app.get('/scenario', async (_request, reply) => {
-  return reply.send({ name: getActiveScenarioName() });
+  const { name, source } = getActiveScenario();
+  return reply.send({ name, source });
+});
+
+app.get<{ Querystring: { name?: string } }>('/scenario-definition', async (request, reply) => {
+  const { name } = request.query ?? {};
+
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    return reply
+      .status(400)
+      .send({ error: 'missing_name', message: 'Query parameter "name" is required.' });
+  }
+
+  const record = dynamicScenarios.get(name);
+
+  if (!record) {
+    return reply.status(404).send({
+      error: 'scenario_not_found',
+      message: `No dynamic scenario named "${name}" is registered.`,
+    });
+  }
+
+  return reply.send({
+    name: record.name,
+    source: 'draft' as const,
+    definition: record.definition,
+    origin: record.origin,
+    appliedAt: record.appliedAt,
+  });
 });
 
 app.get('/scenarios', async (_request, reply) => {
   try {
-    const names = await listScenarioNames();
-    return reply.send({ items: names });
+    const items = await listScenarioItems();
+    return reply.send({ items });
   } catch (error) {
     app.log.error({ err: error }, 'failed to list scenarios');
     return reply.status(500).send({ error: 'Unable to list scenarios.' });
+  }
+});
+
+app.post('/scenario/apply', async (request, reply) => {
+  const parsedBody = applyScenarioBodySchema.safeParse(request.body);
+
+  if (!parsedBody.success) {
+    return reply
+      .status(400)
+      .send({ error: 'invalid_request', message: 'Invalid request body.', issues: parsedBody.error.issues });
+  }
+
+  const body = parsedBody.data;
+
+  try {
+    if (body.type === 'existing') {
+      const source = await ensureScenarioExists(body.name);
+
+      if (source === 'draft') {
+        const record = dynamicScenarios.get(body.name);
+
+        if (record) {
+          registerDynamicScenario({
+            ...record,
+            appliedAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      setActiveScenario(body.name, source);
+
+      return reply.send({ name: body.name, status: 'active', source });
+    }
+
+    const summary = await fetchDraftSummary(body.draftId);
+
+    if (summary.status !== 'ready') {
+      throw new HttpError(400, {
+        error: 'draft_not_ready',
+        message: 'Mark the draft as ready before applying it.',
+      });
+    }
+
+    if (!summary.hasGeneratedScenario) {
+      throw new HttpError(400, {
+        error: 'draft_without_scenario',
+        message: 'Generate the scenario JSON before applying the draft.',
+      });
+    }
+
+    const definition = await fetchDraftScenarioDefinition(body.draftId);
+    const scenarioName = definition.name;
+
+    registerDynamicScenario({
+      name: scenarioName,
+      definition,
+      origin: { type: 'draft', draftId: body.draftId },
+      appliedAt: new Date().toISOString(),
+    });
+
+    setActiveScenario(scenarioName, 'draft');
+
+    return reply.send({ name: scenarioName, status: 'active', source: 'draft' });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      app.log.warn({ err: error }, 'failed to apply scenario');
+      return reply.status(error.status).send(error.payload);
+    }
+
+    app.log.error({ err: error }, 'unexpected error while applying scenario');
+    return reply
+      .status(500)
+      .send({ error: 'unexpected_error', message: 'Failed to apply scenario.' });
   }
 });
 
@@ -180,22 +487,28 @@ app.post<{ Body: { name?: unknown } }>('/scenario', async (request, reply) => {
       .send({ error: 'Request body must include a scenario name.' });
   }
 
-  let available: string[] = [];
-
   try {
-    available = await listScenarioNames();
+    const source = await ensureScenarioExists(name);
+
+    if (source === 'draft') {
+      const record = dynamicScenarios.get(name);
+
+      if (record) {
+        registerDynamicScenario({ ...record, appliedAt: new Date().toISOString() });
+      }
+    }
+
+    setActiveScenario(name, source);
   } catch (error) {
-    app.log.error({ err: error }, 'failed to list scenarios before switch');
+    if (error instanceof HttpError) {
+      return reply.status(error.status).send(error.payload);
+    }
+
+    app.log.error({ err: error }, 'failed to validate scenario before switch');
     return reply
       .status(500)
       .send({ error: 'Unable to validate requested scenario.' });
   }
-
-  if (!available.includes(name)) {
-    return reply.status(400).send({ error: `Unknown scenario "${name}".` });
-  }
-
-  setActiveScenarioName(name);
 
   return reply.send({ name });
 });
@@ -417,9 +730,13 @@ export const __testing = {
   resetLogBuffer,
   getLogEntries,
   getActiveScenarioName,
-  setActiveScenarioName: (name: string) => {
-    activeScenarioName = name;
+  getActiveScenario,
+  setActiveScenarioName: (name: string, source: ScenarioSource = 'business') => {
+    activeScenario = { name, source };
   },
+  clearDynamicScenarios,
+  registerDynamicScenario,
+  listDynamicScenarios,
 };
 
 export { app, consumeLoop };

@@ -20,8 +20,34 @@ export type LogEntry = {
 
 export type ScenarioResponse = {
   name: string;
+  source?: 'business' | 'draft';
+};
+
+export type ScenarioListItem = {
+  name: string;
+  source: 'business' | 'draft';
 };
 
 export type ScenariosResponse = {
-  items: string[];
+  items: ScenarioListItem[];
+};
+
+export type ApplyScenarioResponse = {
+  name: string;
+  status: 'active';
+  source?: 'business' | 'draft';
+};
+
+export type DraftSummary = {
+  id: string;
+  status: 'draft' | 'ready';
+  currentProposal: Record<string, unknown>;
+  hasGeneratedScenario: boolean;
+  generatedScenarioPreview?: unknown;
+  guidance?: string;
+};
+
+export type MarkReadyResponse = {
+  id: string;
+  status: 'ready';
 };

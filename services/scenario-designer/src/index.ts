@@ -54,15 +54,38 @@ type GeneratedScenario = {
   createdAt: string;
 };
 
+type ScenarioDraftStatus = 'draft' | 'ready';
+
 type ScenarioDraft = {
   id: string;
   inputDescription: string;
   currentProposal: ScenarioProposal;
   history: ScenarioDraftHistoryEntry[];
   generatedScenario?: GeneratedScenario;
+  status: ScenarioDraftStatus;
 };
 
 const drafts = new Map<string, ScenarioDraft>();
+
+const buildDraftSummary = (draft: ScenarioDraft) => {
+  const hasGeneratedScenario = Boolean(draft.generatedScenario);
+  let guidance = 'Genera el JSON del escenario cuando la propuesta esté lista.';
+
+  if (hasGeneratedScenario && draft.status === 'draft') {
+    guidance = 'Revisa el JSON generado y marca el borrador como listo cuando esté validado.';
+  } else if (hasGeneratedScenario && draft.status === 'ready') {
+    guidance = 'Este borrador está marcado como listo. Usa visualizer-api para aplicarlo.';
+  }
+
+  return {
+    id: draft.id,
+    status: draft.status,
+    currentProposal: draft.currentProposal,
+    hasGeneratedScenario,
+    generatedScenarioPreview: draft.generatedScenario?.content,
+    guidance,
+  } as const;
+};
 
 const createDraftBodySchema = z
   .object({
@@ -518,6 +541,7 @@ app.post<{ Body: unknown }>('/scenario-drafts', async (request, reply) => {
           timestamp: new Date().toISOString(),
         },
       ],
+      status: 'draft',
     };
 
     drafts.set(draft.id, draft);
@@ -549,6 +573,7 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/refine', 
 
     draft.currentProposal = modelResponse.proposal;
     draft.generatedScenario = undefined;
+    draft.status = 'draft';
     draft.history.push({
       type: 'refinement',
       userNote: feedback,
@@ -587,6 +612,7 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
       content: scenarioJson,
       createdAt: new Date().toISOString(),
     };
+    draft.status = 'draft';
 
     return reply.send({
       id: draft.id,
@@ -614,6 +640,41 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
         message: 'No se pudo generar el JSON del escenario.',
       });
   }
+});
+
+app.get<{ Params: DraftParams }>('/scenario-drafts/:id/summary', async (request, reply) => {
+  const { id } = request.params;
+  const draft = drafts.get(id);
+
+  if (!draft) {
+    return reply
+      .status(404)
+      .send({ error: 'draft_not_found', message: 'Scenario draft not found.' });
+  }
+
+  return reply.send(buildDraftSummary(draft));
+});
+
+app.post<{ Params: DraftParams }>('/scenario-drafts/:id/mark-ready', async (request, reply) => {
+  const { id } = request.params;
+  const draft = drafts.get(id);
+
+  if (!draft) {
+    return reply
+      .status(404)
+      .send({ error: 'draft_not_found', message: 'Scenario draft not found.' });
+  }
+
+  if (!draft.generatedScenario) {
+    return reply.status(400).send({
+      error: 'scenario_not_generated',
+      message: 'Generate the scenario JSON before marking the draft as ready.',
+    });
+  }
+
+  draft.status = 'ready';
+
+  return reply.send({ id: draft.id, status: draft.status });
 });
 
 app.get<{ Params: DraftParams }>('/scenario-drafts/:id', async (request, reply) => {
