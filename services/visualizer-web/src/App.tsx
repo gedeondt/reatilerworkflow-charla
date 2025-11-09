@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  applyScenarioByName,
+  applyScenarioDraft,
+  fetchDraftSummary,
   fetchLogs,
   fetchScenario,
   fetchScenarios,
   fetchTraces,
-  updateScenario,
+  markDraftReady,
 } from "./api";
-import type { LogEntry, TraceView } from "./types";
+import type { DraftSummary, LogEntry, ScenarioListItem, TraceView } from "./types";
 
 const defaultScenario =
   import.meta.env.VITE_SCENARIO_NAME || "retailer-happy-path";
@@ -20,10 +23,19 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeScenario, setActiveScenario] = useState<string | null>(null);
-  const [availableScenarios, setAvailableScenarios] = useState<string[]>([]);
+  const [availableScenarios, setAvailableScenarios] = useState<ScenarioListItem[]>([]);
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
   const [pendingScenario, setPendingScenario] = useState<string | null>(null);
+  const [activeScenarioSource, setActiveScenarioSource] = useState<
+    'business' | 'draft' | null
+  >(null);
+  const [draftIdInput, setDraftIdInput] = useState<string>("");
+  const [draftSummary, setDraftSummary] = useState<DraftSummary | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [isDraftLoading, setIsDraftLoading] = useState<boolean>(false);
+  const [isMarkingReady, setIsMarkingReady] = useState<boolean>(false);
+  const [isApplyingDraft, setIsApplyingDraft] = useState<boolean>(false);
 
   useEffect(() => {
     const tick = () => setNow(new Date().toLocaleTimeString());
@@ -44,8 +56,11 @@ export default function App() {
 
         if (cancelled) return;
 
-        const sortedItems = [...scenariosRes.items].sort();
+        const sortedItems = [...scenariosRes.items].sort((a, b) =>
+          a.name.localeCompare(b.name)
+        );
         setActiveScenario(scenarioRes.name);
+        setActiveScenarioSource(scenarioRes.source ?? "business");
         setAvailableScenarios(sortedItems);
         setScenarioError(null);
       } catch (err) {
@@ -55,13 +70,14 @@ export default function App() {
         setScenarioError("failed to load scenarios");
 
         setActiveScenario((prev) => prev ?? defaultScenario);
+        setActiveScenarioSource((prev) => prev ?? "business");
 
         setAvailableScenarios((prev) => {
           if (prev.length > 0) {
             return prev;
           }
 
-          return [defaultScenario];
+          return [{ name: defaultScenario, source: "business" }];
         });
       }
     };
@@ -82,24 +98,32 @@ export default function App() {
 
     const pollScenario = async () => {
       try {
-        const { name } = await fetchScenario();
+        const scenarioRes = await fetchScenario();
+        const name = scenarioRes.name;
+        const incomingSource = scenarioRes.source ?? "business";
 
         if (cancelled) {
           return;
         }
 
-        if (name && name !== activeScenario) {
+        if (!name) {
+          return;
+        }
+
+        if (name !== activeScenario) {
           setScenarioError(null);
           setPendingScenario(name);
           setIsSwitching(true);
           setActiveScenario(name);
-          setAvailableScenarios((prev) => {
-            if (prev.includes(name)) {
-              return prev;
-            }
-
-            return [...prev, name].sort();
-          });
+          setActiveScenarioSource(incomingSource);
+          setAvailableScenarios((prev) =>
+            upsertScenarioItem(prev, { name, source: incomingSource })
+          );
+        } else if (incomingSource !== activeScenarioSource) {
+          setActiveScenarioSource(incomingSource);
+          setAvailableScenarios((prev) =>
+            upsertScenarioItem(prev, { name, source: incomingSource })
+          );
         }
       } catch (err) {
         if (!cancelled) {
@@ -114,7 +138,7 @@ export default function App() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [activeScenario]);
+  }, [activeScenario, activeScenarioSource]);
 
   useEffect(() => {
     if (!activeScenario) {
@@ -211,15 +235,15 @@ export default function App() {
     setIsSwitching(true);
 
     try {
-      await updateScenario(name);
-      setActiveScenario(name);
-      setAvailableScenarios((prev) => {
-        if (prev.includes(name)) {
-          return prev;
-        }
-
-        return [...prev, name].sort();
-      });
+      const response = await applyScenarioByName(name);
+      setActiveScenario(response.name);
+      setActiveScenarioSource(response.source ?? "business");
+      setAvailableScenarios((prev) =>
+        upsertScenarioItem(prev, {
+          name: response.name,
+          source: response.source ?? "business",
+        })
+      );
     } catch (err) {
       console.warn("Failed to switch scenario", err);
       setScenarioError(
@@ -230,15 +254,142 @@ export default function App() {
     }
   };
 
-  const scenarioOptions = useMemo(() => {
-    const items = new Set(availableScenarios);
+  const handleDraftIdChange = (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    setDraftIdInput(event.target.value);
+  };
 
-    if (activeScenario) {
-      items.add(activeScenario);
+  const handleLoadDraftSummary = async (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    const trimmed = draftIdInput.trim();
+
+    if (!trimmed) {
+      setDraftError("introduce un ID de draft");
+      setDraftSummary(null);
+      return;
     }
 
-    return Array.from(items).sort();
-  }, [availableScenarios, activeScenario]);
+    setDraftError(null);
+    setIsDraftLoading(true);
+
+    try {
+      const summary = await fetchDraftSummary(trimmed);
+      setDraftSummary(summary);
+    } catch (err) {
+      console.warn("Failed to load draft summary", err);
+      setDraftSummary(null);
+      setDraftError(
+        err instanceof Error
+          ? err.message
+          : "no se pudo cargar el resumen del draft",
+      );
+    } finally {
+      setIsDraftLoading(false);
+    }
+  };
+
+  const handleMarkDraftReady = async () => {
+    if (!draftSummary) {
+      return;
+    }
+
+    setDraftError(null);
+    setIsMarkingReady(true);
+
+    try {
+      await markDraftReady(draftSummary.id);
+      const refreshed = await fetchDraftSummary(draftSummary.id);
+      setDraftSummary(refreshed);
+    } catch (err) {
+      console.warn("Failed to mark draft ready", err);
+      setDraftError(
+        err instanceof Error
+          ? err.message
+          : "no se pudo marcar el draft como listo",
+      );
+    } finally {
+      setIsMarkingReady(false);
+    }
+  };
+
+  const handleApplyDraft = async () => {
+    if (!draftSummary) {
+      return;
+    }
+
+    setDraftError(null);
+    setIsApplyingDraft(true);
+    const previewName = (
+      draftSummary.generatedScenarioPreview as { name?: unknown } | undefined
+    )?.name;
+    const proposalName = (
+      draftSummary.currentProposal as { name?: unknown }
+    )?.name;
+    const nextScenarioName =
+      (typeof previewName === "string"
+        ? previewName
+        : typeof proposalName === "string"
+          ? proposalName
+          : undefined) ?? draftSummary.id;
+    setPendingScenario(nextScenarioName);
+    setIsSwitching(true);
+
+    try {
+      const response = await applyScenarioDraft(draftSummary.id);
+      setActiveScenario(response.name);
+      setActiveScenarioSource(response.source ?? "draft");
+      setAvailableScenarios((prev) =>
+        upsertScenarioItem(prev, {
+          name: response.name,
+          source: response.source ?? "draft",
+        })
+      );
+      setScenarioError(null);
+    } catch (err) {
+      console.warn("Failed to apply draft scenario", err);
+      setDraftError(
+        err instanceof Error
+          ? err.message
+          : "no se pudo aplicar el escenario generado",
+      );
+      setIsSwitching(false);
+      setPendingScenario(null);
+    } finally {
+      setIsApplyingDraft(false);
+    }
+  };
+
+  const canMarkReady = Boolean(
+    draftSummary?.hasGeneratedScenario && draftSummary.status !== "ready",
+  );
+  const canApplyDraft = Boolean(
+    draftSummary?.status === "ready" && draftSummary.hasGeneratedScenario,
+  );
+
+  const scenarioOptions = useMemo(() => {
+    const map = new Map<string, ScenarioListItem>();
+
+    for (const item of availableScenarios) {
+      map.set(item.name, item);
+    }
+
+    if (activeScenario) {
+      map.set(activeScenario, {
+        name: activeScenario,
+        source: activeScenarioSource ?? "business",
+      });
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+  }, [availableScenarios, activeScenario, activeScenarioSource]);
+
+  const formatScenarioOption = (item: ScenarioListItem) =>
+    item.source === "draft" ? `${item.name} (draft)` : item.name;
 
   const scenarioLabel = activeScenario ?? "loading…";
 
@@ -275,8 +426,8 @@ export default function App() {
             <option value="">loading…</option>
           ) : null}
           {scenarioOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
+            <option key={option.name} value={option.name}>
+              {formatScenarioOption(option)}
             </option>
           ))}
         </select>
@@ -296,10 +447,91 @@ export default function App() {
     </div>
   );
 
+  const draftPanel = (
+    <div className="w-full border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-300 space-y-2">
+      <form
+        onSubmit={handleLoadDraftSummary}
+        className="flex flex-wrap items-center gap-2"
+      >
+        <label className="uppercase tracking-wide text-zinc-500">
+          draft id
+        </label>
+        <input
+          value={draftIdInput}
+          onChange={handleDraftIdChange}
+          placeholder="00000000-0000-0000-0000-000000000000"
+          className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 rounded min-w-[220px]"
+        />
+        <button
+          type="submit"
+          disabled={isDraftLoading}
+          className="px-2 py-1 rounded border border-zinc-600 text-xs hover:bg-zinc-800 disabled:opacity-50"
+        >
+          ver resumen
+        </button>
+        <button
+          type="button"
+          onClick={handleMarkDraftReady}
+          disabled={!draftSummary || !canMarkReady || isMarkingReady}
+          className="px-2 py-1 rounded border border-yellow-600 text-xs text-yellow-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          marcar listo
+        </button>
+        <button
+          type="button"
+          onClick={handleApplyDraft}
+          disabled={!draftSummary || !canApplyDraft || isApplyingDraft}
+          className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          aplicar escenario
+        </button>
+      </form>
+      {draftError ? (
+        <div className="text-red-400">{draftError}</div>
+      ) : null}
+      {isDraftLoading ? (
+        <div className="text-zinc-500">cargando resumen…</div>
+      ) : null}
+      {draftSummary ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1">
+            <div>
+              <span className="text-zinc-500">estado:</span>{" "}
+              <span className="text-green-400">{draftSummary.status}</span>
+            </div>
+            <div className="text-zinc-400">
+              {draftSummary.guidance ??
+                "Valida el contenido antes de aplicar el escenario."}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="uppercase text-zinc-500">propuesta actual</div>
+            <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">
+              {formatJson(draftSummary.currentProposal)}
+            </pre>
+          </div>
+          {draftSummary.hasGeneratedScenario ? (
+            <div className="space-y-1 md:col-span-2">
+              <div className="uppercase text-zinc-500">json generado</div>
+              <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-56 whitespace-pre-wrap">
+                {formatJson(draftSummary.generatedScenarioPreview)}
+              </pre>
+            </div>
+          ) : (
+            <div className="text-zinc-500 md:col-span-2">
+              Genera el JSON del escenario para poder aplicarlo.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono text-sm flex flex-col">
       {header}
       {statusLine}
+      {draftPanel}
       <div className="flex-1 flex flex-col">
         {domains.length === 0 && !isLoading && !error ? (
           <div className="flex-1 flex items-center justify-center text-zinc-600 text-xs">
@@ -340,6 +572,37 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+function formatJson(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function upsertScenarioItem(
+  list: ScenarioListItem[],
+  item: ScenarioListItem,
+): ScenarioListItem[] {
+  const map = new Map<string, ScenarioListItem>();
+
+  for (const existing of list) {
+    map.set(existing.name, existing);
+  }
+
+  map.set(item.name, item);
+
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function renderDomainRows(domain: string, traces: TraceView[]) {

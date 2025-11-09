@@ -11,6 +11,7 @@ import { z } from 'zod';
 import {
   createScenarioRuntime,
   loadScenario,
+  scenarioSchema,
   type Scenario,
   type ScenarioRuntime
 } from '@reatiler/saga-kernel';
@@ -135,10 +136,14 @@ const extractErrorMessage = (error: unknown): string => {
 
     if (typeof body === 'string' && body.length > 0) {
       try {
-        const parsed = JSON.parse(body) as { error?: unknown };
+        const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
 
         if (parsed && typeof parsed.error === 'string') {
           return parsed.error;
+        }
+
+        if (parsed && typeof parsed.message === 'string') {
+          return parsed.message;
         }
       } catch {
         return body;
@@ -175,6 +180,17 @@ function findBusinessDirectory(startDir: string): string | null {
   return null;
 }
 
+function businessScenarioExists(name: string): boolean {
+  const businessDir = findBusinessDirectory(process.cwd());
+
+  if (!businessDir) {
+    return false;
+  }
+
+  const filePath = join(businessDir, `${name}.json`);
+  return existsSync(filePath);
+}
+
 async function listScenarioNames(): Promise<string[]> {
   const businessDir = findBusinessDirectory(process.cwd());
 
@@ -187,6 +203,50 @@ async function listScenarioNames(): Promise<string[]> {
   return entries
     .filter((entry) => entry.isFile() && extname(entry.name) === '.json')
     .map((entry) => entry.name.replace(/\.json$/u, ''));
+}
+
+async function fetchRemoteScenarioDefinition(name: string): Promise<Scenario> {
+  const url = `${env.VISUALIZER_API_URL}/scenario-definition?name=${encodeURIComponent(name)}`;
+
+  try {
+    const { body } = await httpJson<{ definition?: unknown }>(url);
+
+    let definition: unknown = body;
+
+    if (body && typeof body === 'object' && 'definition' in body) {
+      definition = (body as { definition?: unknown }).definition;
+    }
+
+    const parsed = scenarioSchema.safeParse(definition);
+
+    if (!parsed.success) {
+      const detail = parsed.error.errors.map((issue) => issue.message).join('; ');
+      throw new Error(
+        `Scenario definition from visualizer-api is invalid: ${detail}`,
+      );
+    }
+
+    return parsed.data;
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    const message = extractErrorMessage(error);
+
+    if (status === 404) {
+      throw new Error(`Scenario "${name}" is not registered in visualizer-api.`);
+    }
+
+    throw new Error(
+      `Failed to load scenario "${name}" from visualizer-api: ${message}`,
+    );
+  }
+}
+
+async function loadScenarioForRuntime(name: string): Promise<Scenario> {
+  if (businessScenarioExists(name)) {
+    return loadScenario(name);
+  }
+
+  return fetchRemoteScenarioDefinition(name);
 }
 
 async function fetchVisualizerScenarioName(): Promise<string | null> {
@@ -211,9 +271,9 @@ async function fetchVisualizerScenarioName(): Promise<string | null> {
 }
 
 async function requestScenarioChange(name: string): Promise<void> {
-  await httpJson(`${env.VISUALIZER_API_URL}/scenario`, {
+  await httpJson(`${env.VISUALIZER_API_URL}/scenario/apply`, {
     method: 'POST',
-    body: { name },
+    body: { type: 'existing', name },
   });
 }
 
@@ -238,7 +298,10 @@ async function stopRuntime(): Promise<void> {
   }
 }
 
-async function startRuntime(name: string): Promise<void> {
+async function startRuntime(
+  name: string,
+  preloadedScenario?: Scenario,
+): Promise<void> {
   if (currentScenarioName === name && currentRuntime) {
     app.log.info({ scenario: name }, 'scenario already running');
     return;
@@ -250,7 +313,16 @@ async function startRuntime(name: string): Promise<void> {
 
   app.log.info({ scenario: name }, 'starting scenario runtime');
 
-  const scenario = loadScenario(name);
+  let scenario: Scenario;
+
+  try {
+    scenario = preloadedScenario ?? (await loadScenarioForRuntime(name));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    app.log.error({ err: error, scenario: name }, 'failed to load scenario definition');
+    throw new Error(message);
+  }
+
   const bus = createHttpEventBus(env.MESSAGE_QUEUE_URL);
   const runtime = createScenarioRuntime({
     scenario,
@@ -340,8 +412,10 @@ const scenarioBodySchema = z.object({ name: z.string().min(1) });
 app.post('/scenario', async (req, reply) => {
   const { name } = scenarioBodySchema.parse(req.body);
 
+  let scenario: Scenario;
+
   try {
-    loadScenario(name);
+    scenario = await loadScenarioForRuntime(name);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return reply.status(400).send({ error: message });
@@ -359,7 +433,7 @@ app.post('/scenario', async (req, reply) => {
   }
 
   try {
-    await startRuntime(name);
+    await startRuntime(name, scenario);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     app.log.error(
