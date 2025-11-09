@@ -709,11 +709,11 @@ app.get('/health', async (_request, reply) => {
   return reply.send({ ok: true });
 });
 
-const port = Number(process.env.PORT) || 3400;
+const port = Number(process.env.PORT) || 3201;
 
 try {
   await app.listen({ port, host: '0.0.0.0' });
-  app.log.info({ port }, 'scenario-designer listening');
+  app.log.info(`[scenario-designer] listening on http://localhost:${port}`);
 } catch (error) {
   app.log.error({ err: error }, 'Failed to start scenario-designer');
   process.exit(1);

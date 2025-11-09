@@ -11,8 +11,8 @@ import type {
 
 const API_BASE =
   import.meta.env.VITE_VISUALIZER_API_BASE || "http://localhost:3300";
-const DESIGNER_BASE =
-  import.meta.env.VITE_SCENARIO_DESIGNER_BASE || "http://localhost:3400";
+export const DESIGNER_BASE =
+  import.meta.env.VITE_SCENARIO_DESIGNER_BASE || "http://localhost:3201";
 
 async function parseErrorResponse(res: Response): Promise<string> {
   const text = await res.text();
