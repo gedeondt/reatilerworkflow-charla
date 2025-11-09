@@ -1,7 +1,11 @@
 import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { scenarioSchema, type Scenario } from '@reatiler/saga-kernel';
 import {
   ConfigurationError,
   OpenAIRequestFailedError,
@@ -13,8 +17,6 @@ import {
 type DraftParams = { id: string };
 
 type ScenarioDraftHistoryEntryType = 'initial' | 'refinement';
-
-type ScenarioJson = Record<string, unknown>;
 
 type ScenarioLanguage = 'es';
 
@@ -54,7 +56,7 @@ type ScenarioDraftHistoryEntry = {
 };
 
 type GeneratedScenario = {
-  content: ScenarioJson;
+  content: Scenario;
   createdAt: string;
 };
 
@@ -70,6 +72,18 @@ type ScenarioDraft = {
 };
 
 const drafts = new Map<string, ScenarioDraft>();
+
+const moduleFilename = fileURLToPath(import.meta.url);
+const moduleDirname = dirname(moduleFilename);
+
+const scenarioDslReference = JSON.parse(
+  readFileSync(
+    resolve(moduleDirname, '../../..', 'business', 'retailer-happy-path.json'),
+    'utf8',
+  ),
+) as Scenario;
+
+const scenarioDslReferenceString = JSON.stringify(scenarioDslReference, null, 2);
 
 const buildDraftSummary = (draft: ScenarioDraft) => {
   const hasGeneratedScenario = Boolean(draft.generatedScenario);
@@ -219,43 +233,23 @@ Sigue estas instrucciones con cuidado:
 
 const scenarioJsonPrompt = (draft: ScenarioDraft, language: ScenarioLanguage): string => {
   const proposalSummary = JSON.stringify(draft.currentProposal, null, 2);
-  const baseSchema = JSON.stringify(
-    {
-      name: 'Retailer Happy Path Saga',
-      version: 1,
-      domains: [{ id: 'order', queue: 'orders' }],
-      events: [{ name: 'OrderPlaced' }],
-      listeners: [
-        {
-          id: 'example',
-          on: { event: 'OrderPlaced' },
-          actions: [
-            { type: 'emit', event: 'AnotherEvent', toDomain: 'order' },
-            { type: 'set-state', domain: 'order', status: 'COMPLETED' },
-          ],
-        },
-      ],
-    },
-    null,
-    2,
-  );
 
   return [
-    'Genera un escenario JSON listo para ser usado por el runner interno.',
-    'Utiliza exclusivamente el idioma español en descripciones dentro del JSON.',
+    'Genera la definición ejecutable del escenario retail en formato JSON.',
+    'Debes respetar estrictamente el DSL utilizado por nuestro runner. Usa únicamente las claves y estructuras que aparecen en el siguiente ejemplo real, ajustando los valores según la propuesta actual:',
+    scenarioDslReferenceString,
+    'Instrucciones obligatorias:',
+    '- El objeto raíz debe incluir exactamente las propiedades name, version, domains, events y listeners.',
+    '- Cada dominio debe tener exclusivamente los campos "id" y "queue".',
+    '- Cada evento debe contener únicamente el campo "name".',
+    '- Cada listener debe definir "id", "on" (con "event"), opcionalmente "delayMs" y la lista "actions". Las acciones solo pueden ser de tipo "emit" (event, toDomain) o "set-state" (domain, status).',
+    '- No añadas ninguna propiedad adicional (por ejemplo sagaSummary, openQuestions, subscribesTo, publishes, metadata ni explicaciones).',
+    '- Mantén la coherencia con los dominios y eventos descritos en la propuesta aprobada, adaptando nombres si el flujo lo requiere.',
+    '- Redacta todos los identificadores y estados en español cuando sea pertinente.',
+    '- Devuelve únicamente el JSON final sin comentarios ni texto adicional.',
     `Descripción inicial del reto:\n${draft.inputDescription}`,
     `Propuesta actual aprobada:\n${proposalSummary}`,
-    'Reglas imprescindibles:',
-    '- Produce un único objeto JSON válido que siga la estructura general del escenario base.',
-    '- Respeta la coherencia con los dominios y eventos de la propuesta actual, ajustando nombres cuando sea necesario.',
-    '- Cada dominio debe declarar de forma explícita cómo interactúa (por ejemplo, subscribesTo, publishes u otras claves equivalentes del DSL).',
-    '- Incluye listeners que conecten los eventos relevantes y mantengan la narrativa completa.',
-    '- Solo usa delayMs cuando sea imprescindible para la claridad del flujo.',
-    '- No añadas texto fuera del JSON, ni comentarios, ni explicaciones adicionales.',
-    'Esquema de referencia (no lo copies literal, úsalo como guía de campos admitidos):',
-    baseSchema,
-    `Idioma objetivo: ${language}.`,
-    'Devuelve únicamente el JSON final sin envoltorios adicionales.',
+    `Idioma objetivo para cualquier texto descriptivo: ${language}.`,
   ].join('\n\n');
 };
 
@@ -265,115 +259,50 @@ const requestOpenAIContent = async (
 ): Promise<string> =>
   requestJsonContent({ messages, temperature });
 
-const domainHasInteraction = (domain: Record<string, unknown>): boolean => {
-  const interactionKeys = [
-    'subscribesTo',
-    'publishes',
-    'emits',
-    'consumes',
-    'produces',
-    'commands',
-    'events',
-  ];
+const formatIssuePath = (path: (string | number)[]): string =>
+  path
+    .map((segment) =>
+      typeof segment === 'number' ? `[${segment}]` : (segment.includes('.') ? `['${segment}']` : `.${segment}`),
+    )
+    .join('')
+    .replace(/^[.]/u, '');
 
-  return interactionKeys.some((key) => {
-    const candidate = domain[key];
-    return Array.isArray(candidate) && candidate.length > 0;
+const formatSchemaIssues = (issues: z.ZodIssue[]): string[] =>
+  issues.map((issue) => {
+    const path = formatIssuePath(issue.path);
+    return path ? `${issue.message} (ruta: ${path})` : issue.message;
   });
-};
 
-const validateScenarioJson = (payload: unknown): string[] => {
-  const errors: string[] = [];
+type ScenarioValidationResult =
+  | { type: 'ok'; scenario: Scenario }
+  | { type: 'json-error'; details: string }
+  | { type: 'schema-error'; issues: z.ZodIssue[] };
 
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    errors.push('La respuesta del modelo debe ser un objeto JSON en la raíz.');
-    return errors;
-  }
+const evaluateScenarioResponse = (content: string): ScenarioValidationResult => {
+  let parsed: unknown;
 
-  const root = payload as Record<string, unknown>;
-
-  if (typeof root.name !== 'string' || root.name.trim().length === 0) {
-    errors.push('El campo "name" debe ser un texto no vacío.');
-  }
-
-  if (typeof root.version !== 'number') {
-    errors.push('El campo "version" debe ser un número.');
-  }
-
-  if (!('domains' in root)) {
-    errors.push('Debe existir la propiedad "domains".');
-    return errors;
-  }
-
-  const domainsValue = root.domains;
-
-  if (Array.isArray(domainsValue)) {
-    if (domainsValue.length === 0) {
-      errors.push('La lista de dominios no puede estar vacía.');
-    }
-
-    domainsValue.forEach((domain, index) => {
-      if (!domain || typeof domain !== 'object' || Array.isArray(domain)) {
-        errors.push(`El dominio en la posición ${index} debe ser un objeto.`);
-        return;
-      }
-
-      const domainRecord = domain as Record<string, unknown>;
-      const id = domainRecord.id;
-
-      if (typeof id !== 'string' || id.trim().length === 0) {
-        errors.push(`El dominio en la posición ${index} debe tener un "id" de texto.`);
-      }
-
-      if (!domainHasInteraction(domainRecord)) {
-        errors.push(
-          `El dominio "${typeof id === 'string' ? id : index}" debe declarar interacciones (subscribesTo/publishes/etc.).`,
-        );
-      }
-    });
-  } else if (domainsValue && typeof domainsValue === 'object') {
-    const entries = Object.entries(domainsValue as Record<string, unknown>);
-
-    if (entries.length === 0) {
-      errors.push('La definición de dominios no puede estar vacía.');
-    }
-
-    entries.forEach(([domainId, value]) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        errors.push(`El dominio "${domainId}" debe ser un objeto.`);
-        return;
-      }
-
-      if (!domainHasInteraction(value as Record<string, unknown>)) {
-        errors.push(`El dominio "${domainId}" debe declarar interacciones (subscribesTo/publishes/etc.).`);
-      }
-    });
-  } else {
-    errors.push('El campo "domains" debe ser un objeto o una lista de objetos.');
-  }
-
-  if ('events' in root && !Array.isArray(root.events)) {
-    errors.push('El campo "events" debe ser una lista si está presente.');
-  }
-
-  if ('listeners' in root && !Array.isArray(root.listeners)) {
-    errors.push('El campo "listeners" debe ser una lista si está presente.');
-  }
-
-  return errors;
-};
-
-const parseJson = (content: string): unknown => {
   try {
-    return JSON.parse(content) as unknown;
+    parsed = JSON.parse(content) as unknown;
   } catch (error) {
-    const syntaxError = new Error('invalid json');
-    (syntaxError as { cause?: unknown }).cause = error;
-    throw syntaxError;
+    return {
+      type: 'json-error',
+      details: 'La respuesta del modelo no es JSON válido.',
+    };
   }
+
+  const validation = scenarioSchema.safeParse(parsed);
+
+  if (!validation.success) {
+    return { type: 'schema-error', issues: validation.error.issues };
+  }
+
+  return { type: 'ok', scenario: validation.data };
 };
 
-const generateScenarioJson = async (draft: ScenarioDraft, language: ScenarioLanguage) => {
+const generateScenarioJson = async (
+  draft: ScenarioDraft,
+  language: ScenarioLanguage,
+): Promise<Scenario> => {
   const systemMessage: ChatCompletionMessageParam = {
     role: 'system',
     content:
@@ -393,42 +322,46 @@ const generateScenarioJson = async (draft: ScenarioDraft, language: ScenarioLang
     throw new OpenAIRequestFailedError('No se pudo obtener una respuesta del modelo.');
   }
 
-  let parsed: unknown;
+  const firstEvaluation = evaluateScenarioResponse(firstResponse);
+
+  if (firstEvaluation.type === 'ok') {
+    return firstEvaluation.scenario;
+  }
+
+  const correctionMessage: string =
+    firstEvaluation.type === 'json-error'
+      ? 'La respuesta anterior no es JSON válido. Devuelve únicamente el JSON corregido con el DSL indicado.'
+      : [
+          'La respuesta anterior no cumple el DSL del escenario. Corrige los siguientes problemas sin añadir campos nuevos:',
+          ...formatSchemaIssues(firstEvaluation.issues).map((detail) => `- ${detail}`),
+          'Responde exclusivamente con el JSON corregido.',
+        ].join('\n');
+
+  const retryMessages: ChatCompletionMessageParam[] = [
+    ...baseMessages,
+    { role: 'assistant', content: firstResponse },
+    { role: 'user', content: correctionMessage },
+  ];
+
+  let secondResponse: string;
 
   try {
-    parsed = parseJson(firstResponse);
-  } catch {
-    const retryMessages: ChatCompletionMessageParam[] = [
-      ...baseMessages,
-      { role: 'assistant', content: firstResponse },
-      {
-        role: 'user',
-        content: 'La respuesta anterior no es JSON válido. Responde únicamente con el JSON corregido.',
-      },
-    ];
-
-    let secondResponse: string;
-
-    try {
-      secondResponse = await requestOpenAIContent(retryMessages);
-    } catch (error) {
-      throw new OpenAIRequestFailedError('No se pudo corregir la respuesta del modelo.');
-    }
-
-    try {
-      parsed = parseJson(secondResponse);
-    } catch {
-      throw new OpenAIRequestFailedError('El modelo devolvió una respuesta inválida tras el reintento.');
-    }
+    secondResponse = await requestOpenAIContent(retryMessages);
+  } catch (error) {
+    throw new OpenAIRequestFailedError('No se pudo corregir la respuesta del modelo.');
   }
 
-  const validationErrors = validateScenarioJson(parsed);
+  const secondEvaluation = evaluateScenarioResponse(secondResponse);
 
-  if (validationErrors.length > 0) {
-    throw new ScenarioJsonValidationError(validationErrors);
+  if (secondEvaluation.type === 'ok') {
+    return secondEvaluation.scenario;
   }
 
-  return parsed as ScenarioJson;
+  if (secondEvaluation.type === 'json-error') {
+    throw new ScenarioJsonValidationError([secondEvaluation.details]);
+  }
+
+  throw new ScenarioJsonValidationError(formatSchemaIssues(secondEvaluation.issues));
 };
 
 const callOpenAI = async (prompt: string): Promise<ModelDraftResponse> => {
