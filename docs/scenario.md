@@ -21,6 +21,42 @@ Cada evento incluye `payloadSchema`, que funciona como contrato de datos entre d
 
 En el escenario base, `OrderPlaced` describe identificadores, monto, dirección y líneas del pedido mediante `payloadSchema`, mientras que `OrderConfirmed` solo necesita el identificador y el estado final.【F:business/retailer-happy-path.json†L12-L91】
 
+## Mapping de payloads en acciones `emit`
+
+Cada acción `emit` debe declarar un bloque `mapping` que describe cómo construir el payload del evento de destino a partir del evento que activó el listener. El runtime valida y aplica estos mapeos en tiempo de ejecución para arrastrar los datos a lo largo de toda la SAGA.【F:packages/saga-kernel/src/schema.ts†L1-L420】【F:packages/saga-kernel/src/runtime.ts†L1-L220】
+
+Reglas principales:
+
+- **Escalares** (`string`, `number`, `boolean`): usa alias directo (`"campoDestino": "campoOrigen"`), `{ "from": "campo" }` o constantes `{ "const": valor }`.
+- **Objetos planos**: declara `{ "map": { ... } }` y, si el origen está anidado, añade `objectFrom` para indicar el objeto origen.
+- **Arrays de objetos planos**: usa `{ "arrayFrom": "campoArray", "map": { ... } }` para transformar cada elemento.
+- **Arrays de primitivos** (`string[]`, `number[]`, `boolean[]`): mapea directamente con `from` o alias. No se permiten constantes en este caso.【F:packages/saga-kernel/src/schema.ts†L56-L260】【F:packages/saga-kernel/src/mapping.ts†L1-L220】
+- Los mapeos pueden mezclar valores propagados y constantes, pero no admiten lógica condicional ni transformaciones complejas.
+
+Ejemplo simplificado:
+
+```jsonc
+{
+  "type": "emit",
+  "event": "ShipmentPrepared",
+  "toDomain": "shipping",
+  "mapping": {
+    "shipmentId": { "const": "SHIP-001" },
+    "orderId": "orderId",
+    "amount": "amount",
+    "address": {
+      "objectFrom": "address",
+      "map": {
+        "line1": "line1",
+        "city": "city"
+      }
+    }
+  }
+}
+```
+
+Si un mapeo apunta a un campo inexistente o falta la definición de un atributo obligatorio, la validación del DSL lo marca como error para evitar inconsistencias durante la simulación.【F:packages/saga-kernel/src/schema.ts†L200-L420】
+
 ## Flujo SAGA (happy path)
 
 ```mermaid

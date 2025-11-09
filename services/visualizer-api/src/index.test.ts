@@ -368,7 +368,14 @@ describe('GET /scenario-definition', () => {
           id: 'order-on-OrderPlaced',
           on: { event: 'OrderPlaced' },
           actions: [
-            { type: 'emit', event: 'OrderPlaced', toDomain: 'order' },
+            {
+              type: 'emit',
+              event: 'OrderPlaced',
+              toDomain: 'order',
+              mapping: {
+                orderId: 'orderId'
+              }
+            },
           ],
         },
       ],
@@ -414,7 +421,14 @@ describe('GET /scenario-bootstrap', () => {
           id: 'ventas-on-PedidoCreado',
           on: { event: 'PedidoCreado' },
           actions: [
-            { type: 'emit', event: 'PedidoCreado', toDomain: 'ventas' },
+            {
+              type: 'emit',
+              event: 'PedidoCreado',
+              toDomain: 'ventas',
+              mapping: {
+                pedidoId: 'pedidoId'
+              }
+            },
           ],
         },
       ],
