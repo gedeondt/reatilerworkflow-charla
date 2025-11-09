@@ -51,3 +51,33 @@ export type MarkReadyResponse = {
   id: string;
   status: 'ready';
 };
+
+export type ScenarioProposalEvent = {
+  title: string;
+  description: string;
+};
+
+export type ScenarioProposal = {
+  name: string;
+  domains: string[];
+  events: ScenarioProposalEvent[];
+  sagaSummary: string;
+  openQuestions: string[];
+};
+
+export type DraftCreationResponse = {
+  id: string;
+  inputDescription: string;
+  currentProposal: ScenarioProposal;
+  status: 'draft' | 'ready';
+  history: Array<{
+    type: 'initial' | 'refinement';
+    userNote: string;
+    modelNote: string;
+    timestamp: string;
+  }>;
+  generatedScenario?: {
+    content: Record<string, unknown>;
+    createdAt: string;
+  };
+};
