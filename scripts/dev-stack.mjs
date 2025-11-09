@@ -22,6 +22,7 @@ run("runner", "pnpm", ["-F", "scenario-runner", "dev"], {
 // --- nuevas piezas ---
 run("state-store", "pnpm", ["-F", "@reatiler/state-store", "dev"]);
 run("visualizer-api", "pnpm", ["-F", "@reatiler/visualizer-api", "dev"]);
+run("scenario-designer", "pnpm", ["-F", "@reatiler/scenario-designer", "dev"]);
 
 // --- opcional: frontend ---
 if (process.argv.includes("--with-web")) {
@@ -33,6 +34,7 @@ console.log(
     `Servicios:\n` +
     `- message-queue: http://localhost:3005\n` +
     `- state-store:   http://localhost:3200\n` +
+    `- scenario-designer: http://localhost:3201\n` +
     `- visualizer-api:http://localhost:3300\n` +
     `- scenario-runner: http://localhost:3100\n` +
     `- visualizer-web: http://localhost:5173 (opcional)\n`

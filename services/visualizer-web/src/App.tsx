@@ -49,6 +49,7 @@ export default function App() {
   const [createdDraft, setCreatedDraft] = useState<DraftCreationResponse | null>(
     null,
   );
+  const [isNewScenarioOpen, setIsNewScenarioOpen] = useState<boolean>(false);
 
   useEffect(() => {
     const tick = () => setNow(new Date().toLocaleTimeString());
@@ -279,6 +280,10 @@ export default function App() {
     setDraftDescription(event.target.value);
   };
 
+  const toggleNewScenario = () => {
+    setIsNewScenarioOpen((prev) => !prev);
+  };
+
   const handleCreateDraft = async () => {
     if (!draftDescription.trim()) {
       setCreateDraftError("introduce una descripción antes de continuar");
@@ -288,6 +293,7 @@ export default function App() {
     setCreateDraftError(null);
     setDraftError(null);
     setIsCreatingDraft(true);
+    setCreatedDraft(null);
 
     try {
       const draft = await createScenarioDraft(draftDescription);
@@ -297,7 +303,7 @@ export default function App() {
     } catch (error) {
       console.warn("Failed to create scenario draft", error);
       setCreateDraftError(
-        "No se pudo generar el draft. Asegúrate de que scenario-designer está levantado y tiene OPENAI_API_KEY configurada.",
+        "No se pudo generar el draft. Asegúrate de que @reatiler/scenario-designer está levantado con 'pnpm stack:dev:web' y tiene OPENAI_API_KEY configurada.",
       );
       return;
     } finally {
@@ -495,64 +501,83 @@ export default function App() {
   const draftPanel = (
     <div className="w-full border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-300 space-y-3">
       <div className="space-y-2">
-        <div className="uppercase tracking-wide text-zinc-500">nuevo escenario</div>
-        <textarea
-          value={draftDescription}
-          onChange={handleDraftDescriptionChange}
-          placeholder="Describe un nuevo flujo o proceso para crear un escenario…"
-          className="w-full min-h-[96px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
-        />
-        <p className="text-zinc-500 text-[10px]">
-          Usa frases en castellano. Te propondremos dominios y eventos.
-        </p>
-        <button
-          type="button"
-          onClick={handleCreateDraft}
-          disabled={isCreatingDraft}
-          className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isCreatingDraft
-            ? "generando propuesta inicial…"
-            : createdDraft
-              ? "propuesta generada"
-              : "crear draft"}
-        </button>
-        {createDraftError ? (
-          <div className="text-red-400">{createDraftError}</div>
-        ) : null}
-        {createdDraft ? (
-          <div className="border border-zinc-800 rounded px-3 py-2 bg-zinc-900 space-y-1">
-            <div>
-              <span className="text-zinc-500">Draft creado:</span>{" "}
-              <span className="text-green-400">{createdDraft.id}</span>
+        <div className="border border-zinc-800 rounded bg-zinc-950">
+          <button
+            type="button"
+            onClick={toggleNewScenario}
+            aria-expanded={isNewScenarioOpen}
+            aria-controls="new-scenario-panel"
+            className="w-full flex items-center justify-between gap-2 bg-zinc-900 px-3 py-2 text-zinc-300 hover:bg-zinc-900/70"
+          >
+            <span>Nuevo escenario</span>
+            <span>{isNewScenarioOpen ? "[-]" : "[+]"}</span>
+          </button>
+          {isNewScenarioOpen ? (
+            <div
+              id="new-scenario-panel"
+              className="px-3 py-3 space-y-2 border-t border-zinc-800"
+            >
+              <textarea
+                value={draftDescription}
+                onChange={handleDraftDescriptionChange}
+                placeholder="Describe un nuevo flujo o proceso para crear un escenario…"
+                className="w-full min-h-[96px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
+              />
+              <p className="text-zinc-500 text-[10px]">
+                Usa frases en castellano. Te propondremos dominios y eventos.
+              </p>
+              <button
+                type="button"
+                onClick={handleCreateDraft}
+                disabled={isCreatingDraft}
+                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                crear draft
+              </button>
+              <div className="space-y-2 text-[10px]">
+                {isCreatingDraft ? (
+                  <div className="text-green-400">generando propuesta inicial…</div>
+                ) : null}
+                {createDraftError ? (
+                  <div className="text-red-400">{createDraftError}</div>
+                ) : null}
+                {createdDraft ? (
+                  <div className="border border-zinc-800 rounded px-3 py-2 bg-zinc-900 space-y-1">
+                    <div>
+                      <span className="text-zinc-500">Draft creado:</span>{" "}
+                      <span className="text-green-400">{createdDraft.id}</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500">Dominios sugeridos:</span>{" "}
+                      <span className="text-zinc-300">
+                        {createdDraft.currentProposal.domains.length > 0
+                          ? createdDraft.currentProposal.domains.join(", ")
+                          : "—"}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="text-zinc-500">Eventos clave:</div>
+                      {createdDraft.currentProposal.events.length > 0 ? (
+                        <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
+                          {createdDraft.currentProposal.events.map((event, index) => (
+                            <li key={`${createdDraft.id}-event-${index}`}>
+                              <span className="text-green-400">{event.title}</span>
+                              {event.description ? (
+                                <span className="text-zinc-500"> — {event.description}</span>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="text-zinc-500">—</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
-            <div>
-              <span className="text-zinc-500">Dominios sugeridos:</span>{" "}
-              <span className="text-zinc-300">
-                {createdDraft.currentProposal.domains.length > 0
-                  ? createdDraft.currentProposal.domains.join(", ")
-                  : "—"}
-              </span>
-            </div>
-            <div className="space-y-1">
-              <div className="text-zinc-500">Eventos clave:</div>
-              {createdDraft.currentProposal.events.length > 0 ? (
-                <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
-                  {createdDraft.currentProposal.events.map((event, index) => (
-                    <li key={`${createdDraft.id}-event-${index}`}>
-                      <span className="text-green-400">{event.title}</span>
-                      {event.description ? (
-                        <span className="text-zinc-500"> — {event.description}</span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="text-zinc-500">—</div>
-              )}
-            </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
       <form
         onSubmit={handleLoadDraftSummary}
