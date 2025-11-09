@@ -21,6 +21,7 @@ import type {
   ScenarioProposal,
   TraceView,
 } from "./types";
+import NewScenarioDiagram from "./NewScenarioDiagram";
 
 type BootstrapHint = {
   queue: string;
@@ -691,10 +692,14 @@ export default function App() {
   const canSubmitRefinement = refinementFeedback.trim().length > 0;
 
   const activeDraftId = draftSummary?.id ?? createdDraft?.id ?? null;
+  const summaryPreviewValue = draftSummary?.generatedScenarioPreview;
+  const summaryPreviewRecord =
+    summaryPreviewValue && typeof summaryPreviewValue === "object"
+      ? (summaryPreviewValue as Record<string, unknown>)
+      : null;
+  const scenarioPreviewData = generatedScenario ?? summaryPreviewRecord ?? null;
   const hasGeneratedScenarioAvailable = Boolean(
-    generatedScenario ??
-      (draftSummary?.hasGeneratedScenario &&
-        draftSummary.generatedScenarioPreview),
+    scenarioPreviewData ?? draftSummary?.hasGeneratedScenario,
   );
   const isStep2Enabled = Boolean(activeDraftId);
   const isStep3Enabled = Boolean(activeDraftId);
@@ -725,7 +730,7 @@ export default function App() {
     { id: 1, label: "Descripción", enabled: true },
     { id: 2, label: "Refinar", enabled: isStep2Enabled },
     { id: 3, label: "Generar JSON", enabled: isStep3Enabled },
-    { id: 4, label: "Vista previa", enabled: isStep4Enabled },
+    { id: 4, label: "Vista previa y aplicar", enabled: isStep4Enabled },
   ] as const;
 
   const stepContent = (() => {
@@ -1006,7 +1011,7 @@ export default function App() {
           : jsonStatus === "success"
             ? "Generado"
             : "Pendiente";
-        const preview = generatedScenario ?? draftSummary?.generatedScenarioPreview ?? null;
+        const preview = scenarioPreviewData;
 
         return (
           <div className="space-y-4">
@@ -1059,38 +1064,25 @@ export default function App() {
         if (!isStep4Enabled) {
           return (
             <div className="text-zinc-500 text-[10px]">
-              Genera el JSON y márquelo como listo antes de aplicar el escenario.
+              Genera primero el JSON del escenario para ver la vista previa.
             </div>
           );
         }
 
-        const preview = generatedScenario ?? draftSummary?.generatedScenarioPreview ?? null;
-
         return (
           <div className="space-y-4">
-            <div className="border border-dashed border-zinc-700 rounded px-4 py-4 bg-zinc-900/60 space-y-2">
+            <div className="space-y-2">
               <div className="uppercase text-[10px] text-zinc-500">
-                Vista previa del flujo (SAGA)
+                Vista previa del flujo
               </div>
-              <div className="text-zinc-300 text-[11px]">
-                Aquí se mostrará el diagrama de la SAGA generada antes de aprobarla.
-              </div>
-              {currentProposal?.name ? (
-                <div className="text-[10px] text-zinc-500">
-                  Escenario: <span className="text-green-400">{currentProposal.name}</span>
+              {scenarioPreviewData ? (
+                <NewScenarioDiagram scenarioJson={scenarioPreviewData} />
+              ) : (
+                <div className="text-zinc-500 text-[10px]">
+                  Genera primero el JSON del escenario para ver la vista previa.
                 </div>
-              ) : null}
+              )}
             </div>
-            {preview ? (
-              <div className="space-y-2">
-                <div className="uppercase text-[10px] text-zinc-500">
-                  Definición generada
-                </div>
-                <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-2 text-[10px] overflow-auto max-h-64 whitespace-pre-wrap">
-                  {formatJson(preview)}
-                </pre>
-              </div>
-            ) : null}
             {step4Error ? (
               <div className="text-red-400 text-[10px]">{step4Error}</div>
             ) : null}
