@@ -416,6 +416,16 @@ export default function App() {
         })
       );
       setScenarioError(null);
+      setDraftSummary(null);
+      setDraftInfoMessage(null);
+      setDraftSuccessMessage(null);
+      setDraftError(null);
+      setCreatedDraft(null);
+      setDraftDescription("");
+      setDraftIdInput("");
+      setRefinementFeedback("");
+      setCreateDraftError(null);
+      setIsNewScenarioOpen(false);
     } catch (err) {
       console.warn("Failed to apply draft scenario", err);
       setDraftError(
@@ -585,197 +595,197 @@ export default function App() {
   );
 
   const draftPanel = (
-    <div className="w-full border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-300 space-y-3">
-      <div className="space-y-2">
-        <div className="border border-zinc-800 rounded bg-zinc-950">
-          <button
-            type="button"
-            onClick={toggleNewScenario}
-            aria-expanded={isNewScenarioOpen}
-            aria-controls="new-scenario-panel"
-            className="w-full flex items-center justify-between gap-2 bg-zinc-900 px-3 py-2 text-zinc-300 hover:bg-zinc-900/70"
-          >
-            <span>Nuevo escenario</span>
-            <span>{isNewScenarioOpen ? "[-]" : "[+]"}</span>
-          </button>
-          {isNewScenarioOpen ? (
-            <div
-              id="new-scenario-panel"
-              className="px-3 py-3 space-y-2 border-t border-zinc-800"
+    <section className="w-full border-b border-zinc-800 bg-zinc-950 text-[11px] text-zinc-300">
+      <button
+        type="button"
+        onClick={toggleNewScenario}
+        aria-expanded={isNewScenarioOpen}
+        aria-controls="new-scenario-panel"
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-zinc-900 text-zinc-300 hover:bg-zinc-900/70"
+      >
+        <span>Nuevo escenario</span>
+        <span>{isNewScenarioOpen ? "[-]" : "[+]"}</span>
+      </button>
+      {isNewScenarioOpen ? (
+        <div
+          id="new-scenario-panel"
+          className="px-3 py-3 space-y-3 border-t border-zinc-800"
+        >
+          <div className="space-y-2">
+            <textarea
+              value={draftDescription}
+              onChange={handleDraftDescriptionChange}
+              placeholder="Describe un nuevo flujo o proceso para crear un escenario…"
+              className="w-full min-h-[96px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
+            />
+            <p className="text-zinc-500 text-[10px]">
+              Usa frases en castellano. Te propondremos dominios y eventos.
+            </p>
+            <button
+              type="button"
+              onClick={handleCreateDraft}
+              disabled={isCreatingDraft}
+              className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <textarea
-                value={draftDescription}
-                onChange={handleDraftDescriptionChange}
-                placeholder="Describe un nuevo flujo o proceso para crear un escenario…"
-                className="w-full min-h-[96px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
-              />
-              <p className="text-zinc-500 text-[10px]">
-                Usa frases en castellano. Te propondremos dominios y eventos.
-              </p>
-              <button
-                type="button"
-                onClick={handleCreateDraft}
-                disabled={isCreatingDraft}
-                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                crear draft
-              </button>
-              <div className="space-y-2 text-[10px]">
-                {isCreatingDraft ? (
-                  <div className="text-green-400">generando propuesta inicial…</div>
-                ) : null}
-                {createDraftError ? (
-                  <div className="text-red-400">{createDraftError}</div>
-                ) : null}
-                {createdDraft ? (
-                  <div className="border border-zinc-800 rounded px-3 py-2 bg-zinc-900 space-y-1">
-                    <div>
-                      <span className="text-zinc-500">Draft creado:</span>{" "}
-                      <span className="text-green-400">{createdDraft.id}</span>
-                    </div>
-                    <div>
-                      <span className="text-zinc-500">Dominios sugeridos:</span>{" "}
-                      <span className="text-zinc-300">
-                        {createdDraft.currentProposal.domains.length > 0
-                          ? createdDraft.currentProposal.domains.join(", ")
-                          : "—"}
-                      </span>
-                    </div>
-                    <div className="space-y-1">
-                      <div className="text-zinc-500">Eventos clave:</div>
-                      {createdDraft.currentProposal.events.length > 0 ? (
-                        <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
-                          {createdDraft.currentProposal.events.map((event, index) => (
-                            <li key={`${createdDraft.id}-event-${index}`}>
-                              <span className="text-green-400">{event.title}</span>
-                              {event.description ? (
-                                <span className="text-zinc-500"> — {event.description}</span>
-                              ) : null}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <div className="text-zinc-500">—</div>
-                      )}
-                    </div>
+              crear draft
+            </button>
+            <div className="space-y-2 text-[10px]">
+              {isCreatingDraft ? (
+                <div className="text-green-400">generando propuesta inicial…</div>
+              ) : null}
+              {createDraftError ? (
+                <div className="text-red-400">{createDraftError}</div>
+              ) : null}
+              {createdDraft ? (
+                <div className="border border-zinc-800 rounded px-3 py-2 bg-zinc-900 space-y-1">
+                  <div>
+                    <span className="text-zinc-500">Draft creado:</span>{" "}
+                    <span className="text-green-400">{createdDraft.id}</span>
                   </div>
-                ) : null}
+                  <div>
+                    <span className="text-zinc-500">Dominios sugeridos:</span>{" "}
+                    <span className="text-zinc-300">
+                      {createdDraft.currentProposal.domains.length > 0
+                        ? createdDraft.currentProposal.domains.join(", ")
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-zinc-500">Eventos clave:</div>
+                    {createdDraft.currentProposal.events.length > 0 ? (
+                      <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
+                        {createdDraft.currentProposal.events.map((event, index) => (
+                          <li key={`${createdDraft.id}-event-${index}`}>
+                            <span className="text-green-400">{event.title}</span>
+                            {event.description ? (
+                              <span className="text-zinc-500"> — {event.description}</span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-zinc-500">—</div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <form
+            onSubmit={handleLoadDraftSummary}
+            className="flex flex-wrap items-center gap-2"
+          >
+            <label className="uppercase tracking-wide text-zinc-500">
+              draft id
+            </label>
+            <input
+              value={draftIdInput}
+              onChange={handleDraftIdChange}
+              placeholder="00000000-0000-0000-0000-000000000000"
+              className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 rounded min-w-[220px]"
+            />
+            <button
+              type="submit"
+              disabled={isDraftLoading || isDraftActionPending}
+              className="px-2 py-1 rounded border border-zinc-600 text-xs hover:bg-zinc-800 disabled:opacity-50"
+            >
+              ver resumen
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerateDraftJson}
+              disabled={!draftSummary || isDraftLoading || isDraftActionPending}
+              className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              Generar JSON
+            </button>
+            <button
+              type="button"
+              onClick={handleMarkDraftReady}
+              disabled={!draftSummary || !canMarkReady || isDraftActionPending}
+              className="px-2 py-1 rounded border border-yellow-600 text-xs text-yellow-300 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              marcar listo
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyDraft}
+              disabled={!draftSummary || !canApplyDraft || isDraftActionPending}
+              className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              aplicar escenario
+            </button>
+          </form>
+          <div className="space-y-1 text-[10px]">
+            {draftError ? (
+              <div className="text-red-400">{draftError}</div>
+            ) : null}
+            {draftInfoMessage ? (
+              <div className="text-zinc-400">{draftInfoMessage}</div>
+            ) : null}
+            {draftSuccessMessage ? (
+              <div className="text-green-400">{draftSuccessMessage}</div>
+            ) : null}
+            {isDraftLoading ? (
+              <div className="text-zinc-500">cargando resumen…</div>
+            ) : null}
+          </div>
+          {draftSummary ? (
+            <div className="space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1">
+                  <div>
+                    <span className="text-zinc-500">estado:</span>{" "}
+                    <span className="text-green-400">{draftSummary.status}</span>
+                  </div>
+                  <div className="text-zinc-400">
+                    {draftSummary.guidance ??
+                      "Valida el contenido antes de aplicar el escenario."}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <div className="uppercase text-zinc-500">propuesta actual</div>
+                  <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">
+                    {formatJson(draftSummary.currentProposal)}
+                  </pre>
+                </div>
+                {draftSummary.hasGeneratedScenario ? (
+                  <div className="space-y-1 md:col-span-2">
+                    <div className="uppercase text-zinc-500">json generado</div>
+                    <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-56 whitespace-pre-wrap">
+                      {formatJson(draftSummary.generatedScenarioPreview)}
+                    </pre>
+                  </div>
+                ) : (
+                  <div className="text-zinc-500 md:col-span-2">
+                    Genera el JSON del escenario para poder aplicarlo.
+                  </div>
+                )}
+              </div>
+              <div className="space-y-2">
+                <textarea
+                  value={refinementFeedback}
+                  onChange={handleRefinementFeedbackChange}
+                  placeholder="Introduce mejoras o feedback..."
+                  disabled={!draftSummary || isDraftActionPending}
+                  className="w-full min-h-[72px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600 disabled:opacity-50"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRefineDraft}
+                    disabled={!draftSummary || !canSubmitRefinement || isDraftActionPending}
+                    className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Refinar propuesta
+                  </button>
+                </div>
               </div>
             </div>
           ) : null}
         </div>
-      </div>
-      <form
-        onSubmit={handleLoadDraftSummary}
-        className="flex flex-wrap items-center gap-2"
-      >
-        <label className="uppercase tracking-wide text-zinc-500">
-          draft id
-        </label>
-        <input
-          value={draftIdInput}
-          onChange={handleDraftIdChange}
-          placeholder="00000000-0000-0000-0000-000000000000"
-          className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 rounded min-w-[220px]"
-        />
-        <button
-          type="submit"
-          disabled={isDraftLoading || isDraftActionPending}
-          className="px-2 py-1 rounded border border-zinc-600 text-xs hover:bg-zinc-800 disabled:opacity-50"
-        >
-          ver resumen
-        </button>
-        <button
-          type="button"
-          onClick={handleGenerateDraftJson}
-          disabled={!draftSummary || isDraftLoading || isDraftActionPending}
-          className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          Generar JSON
-        </button>
-        <button
-          type="button"
-          onClick={handleMarkDraftReady}
-          disabled={!draftSummary || !canMarkReady || isDraftActionPending}
-          className="px-2 py-1 rounded border border-yellow-600 text-xs text-yellow-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          marcar listo
-        </button>
-        <button
-          type="button"
-          onClick={handleApplyDraft}
-          disabled={!draftSummary || !canApplyDraft || isDraftActionPending}
-          className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          aplicar escenario
-        </button>
-      </form>
-      {draftError ? (
-        <div className="text-red-400">{draftError}</div>
       ) : null}
-      {draftInfoMessage ? (
-        <div className="text-zinc-400">{draftInfoMessage}</div>
-      ) : null}
-      {draftSuccessMessage ? (
-        <div className="text-green-400">{draftSuccessMessage}</div>
-      ) : null}
-      {isDraftLoading ? (
-        <div className="text-zinc-500">cargando resumen…</div>
-      ) : null}
-      {draftSummary ? (
-        <div className="space-y-3">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <div>
-                <span className="text-zinc-500">estado:</span>{" "}
-                <span className="text-green-400">{draftSummary.status}</span>
-              </div>
-              <div className="text-zinc-400">
-                {draftSummary.guidance ??
-                  "Valida el contenido antes de aplicar el escenario."}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <div className="uppercase text-zinc-500">propuesta actual</div>
-              <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">
-                {formatJson(draftSummary.currentProposal)}
-              </pre>
-            </div>
-            {draftSummary.hasGeneratedScenario ? (
-              <div className="space-y-1 md:col-span-2">
-                <div className="uppercase text-zinc-500">json generado</div>
-                <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-56 whitespace-pre-wrap">
-                  {formatJson(draftSummary.generatedScenarioPreview)}
-                </pre>
-              </div>
-            ) : (
-              <div className="text-zinc-500 md:col-span-2">
-                Genera el JSON del escenario para poder aplicarlo.
-              </div>
-            )}
-          </div>
-          <div className="space-y-2">
-            <textarea
-              value={refinementFeedback}
-              onChange={handleRefinementFeedbackChange}
-              placeholder="Introduce mejoras o feedback..."
-              disabled={!draftSummary || isDraftActionPending}
-              className="w-full min-h-[72px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600 disabled:opacity-50"
-            />
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleRefineDraft}
-                disabled={!draftSummary || !canSubmitRefinement || isDraftActionPending}
-                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Refinar propuesta
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
+    </section>
   );
 
   return (
