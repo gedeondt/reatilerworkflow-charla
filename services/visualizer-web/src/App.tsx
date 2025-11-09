@@ -18,6 +18,7 @@ import type {
   DraftSummary,
   LogEntry,
   ScenarioListItem,
+  ScenarioProposal,
   TraceView,
 } from "./types";
 
@@ -46,26 +47,36 @@ export default function App() {
   const [activeScenarioSource, setActiveScenarioSource] = useState<
     'business' | 'draft' | null
   >(null);
-  const [draftIdInput, setDraftIdInput] = useState<string>("");
+  const [existingDraftIdInput, setExistingDraftIdInput] = useState<string>("");
   const [draftSummary, setDraftSummary] = useState<DraftSummary | null>(null);
-  const [draftError, setDraftError] = useState<string | null>(null);
   const [isDraftLoading, setIsDraftLoading] = useState<boolean>(false);
   const [isMarkingReady, setIsMarkingReady] = useState<boolean>(false);
   const [isApplyingDraft, setIsApplyingDraft] = useState<boolean>(false);
   const [isGeneratingJson, setIsGeneratingJson] = useState<boolean>(false);
   const [isRefiningDraft, setIsRefiningDraft] = useState<boolean>(false);
-  const [draftInfoMessage, setDraftInfoMessage] = useState<string | null>(null);
-  const [draftSuccessMessage, setDraftSuccessMessage] = useState<string | null>(
-    null,
-  );
   const [draftDescription, setDraftDescription] = useState<string>("");
-  const [createDraftError, setCreateDraftError] = useState<string | null>(null);
   const [isCreatingDraft, setIsCreatingDraft] = useState<boolean>(false);
   const [createdDraft, setCreatedDraft] = useState<DraftCreationResponse | null>(
     null,
   );
   const [isNewScenarioOpen, setIsNewScenarioOpen] = useState<boolean>(false);
   const [refinementFeedback, setRefinementFeedback] = useState<string>("");
+  const [activeWizardStep, setActiveWizardStep] = useState<number>(1);
+  const [step1Error, setStep1Error] = useState<string | null>(null);
+  const [step2Error, setStep2Error] = useState<string | null>(null);
+  const [step2Message, setStep2Message] = useState<string | null>(null);
+  const [step3Error, setStep3Error] = useState<string | null>(null);
+  const [step4Error, setStep4Error] = useState<string | null>(null);
+  const [step4Message, setStep4Message] = useState<string | null>(null);
+  const [jsonStatus, setJsonStatus] = useState<"idle" | "pending" | "success">(
+    "idle",
+  );
+  const [generatedScenario, setGeneratedScenario] = useState<
+    Record<string, unknown> | null
+  >(null);
+  const [currentProposal, setCurrentProposal] = useState<ScenarioProposal | null>(
+    null,
+  );
   const [bootstrapHint, setBootstrapHint] = useState<BootstrapHint | null>(null);
 
   const readScenarioBootstrap = useCallback(async (): Promise<BootstrapHint | null> => {
@@ -341,10 +352,10 @@ export default function App() {
     }
   };
 
-  const handleDraftIdChange = (
+  const handleExistingDraftIdChange = (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    setDraftIdInput(event.target.value);
+    setExistingDraftIdInput(event.target.value);
   };
 
   const handleDraftDescriptionChange = (
@@ -357,26 +368,74 @@ export default function App() {
     setIsNewScenarioOpen((prev) => !prev);
   };
 
+  const resetWizard = useCallback(() => {
+    setDraftSummary(null);
+    setDraftDescription("");
+    setIsCreatingDraft(false);
+    setCreatedDraft(null);
+    setRefinementFeedback("");
+    setActiveWizardStep(1);
+    setStep1Error(null);
+    setStep2Error(null);
+    setStep2Message(null);
+    setStep3Error(null);
+    setStep4Error(null);
+    setStep4Message(null);
+    setJsonStatus("idle");
+    setGeneratedScenario(null);
+    setCurrentProposal(null);
+    setExistingDraftIdInput("");
+  }, []);
+
   const handleCreateDraft = async () => {
     if (!draftDescription.trim()) {
-      setCreateDraftError("introduce una descripción antes de continuar");
+      setStep1Error("Introduce una descripción antes de continuar");
       return;
     }
 
-    setCreateDraftError(null);
-    setDraftError(null);
+    setStep1Error(null);
+    setStep2Error(null);
+    setStep2Message(null);
+    setStep3Error(null);
+    setJsonStatus("idle");
+    setGeneratedScenario(null);
     setIsCreatingDraft(true);
     setCreatedDraft(null);
+    setCurrentProposal(null);
 
     try {
       const draft = await createScenarioDraft(draftDescription);
       setCreatedDraft(draft);
-      setDraftIdInput(draft.id);
-      setDraftSummary(null);
+      setCurrentProposal(draft.currentProposal);
+      setExistingDraftIdInput(draft.id);
+
+      try {
+        const summary = await fetchDraftSummary(draft.id);
+        setDraftSummary(summary);
+        const parsedProposal = parseScenarioProposal(summary.currentProposal);
+        if (parsedProposal) {
+          setCurrentProposal(parsedProposal);
+        }
+        if (summary.hasGeneratedScenario) {
+          setJsonStatus("success");
+          setGeneratedScenario(
+            (summary.generatedScenarioPreview as Record<string, unknown>) ??
+              null,
+          );
+        } else {
+          setJsonStatus("idle");
+          setGeneratedScenario(null);
+        }
+      } catch (summaryError) {
+        console.warn("Failed to refresh draft summary", summaryError);
+        setDraftSummary(null);
+      }
+
+      setActiveWizardStep(2);
     } catch (error) {
       console.warn("Failed to create scenario draft", error);
-      setCreateDraftError(
-        "No se pudo generar el draft. Asegúrate de que @reatiler/scenario-designer está levantado con 'pnpm stack:dev:web' y tiene OPENAI_API_KEY configurada.",
+      setStep1Error(
+        "No se pudo generar el borrador. Asegúrate de que @reatiler/scenario-designer está levantado con 'pnpm stack:dev:web' y tiene OPENAI_API_KEY configurada.",
       );
       return;
     } finally {
@@ -388,31 +447,46 @@ export default function App() {
     event: React.FormEvent<HTMLFormElement>,
   ) => {
     event.preventDefault();
-    const trimmed = draftIdInput.trim();
+    const trimmed = existingDraftIdInput.trim();
 
     if (!trimmed) {
-      setDraftError("introduce un ID de draft");
+      setStep1Error("Introduce un ID de borrador válido");
       setDraftSummary(null);
-      setDraftInfoMessage(null);
-      setDraftSuccessMessage(null);
       return;
     }
 
-    setDraftError(null);
-    setDraftInfoMessage(null);
-    setDraftSuccessMessage(null);
+    setStep1Error(null);
+    setStep2Error(null);
+    setStep2Message(null);
+    setStep3Error(null);
+    setJsonStatus("idle");
+    setGeneratedScenario(null);
+    setCreatedDraft(null);
+    setCurrentProposal(null);
     setIsDraftLoading(true);
 
     try {
       const summary = await fetchDraftSummary(trimmed);
+      setExistingDraftIdInput(summary.id ?? trimmed);
       setDraftSummary(summary);
+      const parsedProposal = parseScenarioProposal(summary.currentProposal);
+      if (parsedProposal) {
+        setCurrentProposal(parsedProposal);
+      }
+      if (summary.hasGeneratedScenario) {
+        setJsonStatus("success");
+        setGeneratedScenario(
+          (summary.generatedScenarioPreview as Record<string, unknown>) ?? null,
+        );
+      }
+      setActiveWizardStep(2);
     } catch (err) {
       console.warn("Failed to load draft summary", err);
       setDraftSummary(null);
-      setDraftError(
+      setStep1Error(
         err instanceof Error
           ? err.message
-          : "no se pudo cargar el resumen del draft",
+          : "No se pudo cargar el borrador indicado.",
       );
     } finally {
       setIsDraftLoading(false);
@@ -424,21 +498,21 @@ export default function App() {
       return;
     }
 
-    setDraftError(null);
-    setDraftInfoMessage(null);
-    setDraftSuccessMessage(null);
+    setStep4Error(null);
+    setStep4Message(null);
     setIsMarkingReady(true);
 
     try {
       await markDraftReady(draftSummary.id);
       const refreshed = await fetchDraftSummary(draftSummary.id);
       setDraftSummary(refreshed);
+      setStep4Message("Borrador marcado como listo.");
     } catch (err) {
       console.warn("Failed to mark draft ready", err);
-      setDraftError(
+      setStep4Error(
         err instanceof Error
           ? err.message
-          : "no se pudo marcar el draft como listo",
+          : "No se pudo marcar el borrador como listo.",
       );
     } finally {
       setIsMarkingReady(false);
@@ -450,9 +524,8 @@ export default function App() {
       return;
     }
 
-    setDraftError(null);
-    setDraftInfoMessage(null);
-    setDraftSuccessMessage(null);
+    setStep4Error(null);
+    setStep4Message(null);
     setIsApplyingDraft(true);
     const previewName = (
       draftSummary.generatedScenarioPreview as { name?: unknown } | undefined
@@ -480,15 +553,7 @@ export default function App() {
         })
       );
       setScenarioError(null);
-      setDraftSummary(null);
-      setDraftInfoMessage(null);
-      setDraftSuccessMessage(null);
-      setDraftError(null);
-      setCreatedDraft(null);
-      setDraftDescription("");
-      setDraftIdInput("");
-      setRefinementFeedback("");
-      setCreateDraftError(null);
+      resetWizard();
       setIsNewScenarioOpen(false);
 
       try {
@@ -510,10 +575,10 @@ export default function App() {
       setBootstrapHint(bootstrap);
     } catch (err) {
       console.warn("Failed to apply draft scenario", err);
-      setDraftError(
+      setStep4Error(
         err instanceof Error
           ? err.message
-          : "no se pudo aplicar el escenario generado",
+          : "No se pudo aplicar el escenario generado.",
       );
       setIsSwitching(false);
       setPendingScenario(null);
@@ -527,23 +592,48 @@ export default function App() {
       return;
     }
 
-    setDraftError(null);
-    setDraftSuccessMessage(null);
-    setDraftInfoMessage("Generando JSON del escenario...");
+    setStep2Message(null);
+    setStep3Error(null);
+    setJsonStatus("pending");
     setIsGeneratingJson(true);
 
     try {
       await generateDraftJson(draftSummary.id);
       const refreshed = await fetchDraftSummary(draftSummary.id);
       setDraftSummary(refreshed);
-      setDraftInfoMessage(null);
-      setDraftSuccessMessage("JSON generado correctamente");
+      const parsedProposal = parseScenarioProposal(refreshed.currentProposal);
+      if (parsedProposal) {
+        setCurrentProposal(parsedProposal);
+      }
+      if (refreshed.hasGeneratedScenario) {
+        setJsonStatus("success");
+        setGeneratedScenario(
+          (refreshed.generatedScenarioPreview as Record<string, unknown>) ?? null,
+        );
+        setActiveWizardStep(4);
+      } else {
+        setJsonStatus("idle");
+        setGeneratedScenario(null);
+      }
     } catch (err) {
       console.warn("Failed to generate scenario JSON", err);
-      setDraftInfoMessage(null);
-      setDraftError(
-        "Error generando JSON. Comprueba que OpenAI está disponible y que scenario-designer está levantado.",
-      );
+      setJsonStatus("idle");
+      setGeneratedScenario(null);
+      const message =
+        err instanceof Error ? err.message.toLowerCase() : String(err);
+      if (message.includes("invalid") || message.includes("formato")) {
+        setStep3Error(
+          "La definición generada no es válida, revisa la descripción o refina la propuesta.",
+        );
+      } else if (message.includes("openai")) {
+        setStep3Error(
+          "No se pudo generar el JSON debido a un error de OpenAI. Inténtalo de nuevo en unos segundos.",
+        );
+      } else {
+        setStep3Error(
+          "Error generando JSON. Comprueba que scenario-designer está levantado y vuelve a intentarlo.",
+        );
+      }
     } finally {
       setIsGeneratingJson(false);
     }
@@ -553,6 +643,9 @@ export default function App() {
     event: React.ChangeEvent<HTMLTextAreaElement>,
   ) => {
     setRefinementFeedback(event.target.value);
+    if (step2Error) {
+      setStep2Error(null);
+    }
   };
 
   const handleRefineDraft = async () => {
@@ -566,22 +659,21 @@ export default function App() {
       return;
     }
 
-    setDraftError(null);
-    setDraftSuccessMessage(null);
-    setDraftInfoMessage("Refinando...");
+    setStep2Error(null);
+    setStep2Message("Refinando propuesta...");
     setIsRefiningDraft(true);
 
     try {
-      await refineScenarioDraft(draftSummary.id, trimmed);
+      const refined = await refineScenarioDraft(draftSummary.id, trimmed);
       const refreshed = await fetchDraftSummary(draftSummary.id);
       setDraftSummary(refreshed);
-      setDraftInfoMessage(null);
-      setDraftSuccessMessage("Propuesta refinada correctamente");
+      setCurrentProposal(refined.currentProposal);
+      setStep2Message("Propuesta refinada correctamente");
       setRefinementFeedback("");
     } catch (err) {
       console.warn("Failed to refine draft proposal", err);
-      setDraftInfoMessage(null);
-      setDraftError("Error refinando propuesta.");
+      setStep2Message(null);
+      setStep2Error("Error refinando propuesta.");
     } finally {
       setIsRefiningDraft(false);
     }
@@ -597,6 +689,445 @@ export default function App() {
   const isDraftActionPending =
     isGeneratingJson || isRefiningDraft || isMarkingReady || isApplyingDraft;
   const canSubmitRefinement = refinementFeedback.trim().length > 0;
+
+  const activeDraftId = draftSummary?.id ?? createdDraft?.id ?? null;
+  const hasGeneratedScenarioAvailable = Boolean(
+    generatedScenario ??
+      (draftSummary?.hasGeneratedScenario &&
+        draftSummary.generatedScenarioPreview),
+  );
+  const isStep2Enabled = Boolean(activeDraftId);
+  const isStep3Enabled = Boolean(activeDraftId);
+  const isStep4Enabled = Boolean(activeDraftId && hasGeneratedScenarioAvailable);
+
+  useEffect(() => {
+    if (!isStep2Enabled && activeWizardStep > 1) {
+      setActiveWizardStep(1);
+      return;
+    }
+
+    if (!isStep3Enabled && activeWizardStep > 2) {
+      setActiveWizardStep(2);
+      return;
+    }
+
+    if (!isStep4Enabled && activeWizardStep > 3) {
+      setActiveWizardStep(3);
+    }
+  }, [
+    activeWizardStep,
+    isStep2Enabled,
+    isStep3Enabled,
+    isStep4Enabled,
+  ]);
+
+  const wizardSteps = [
+    { id: 1, label: "Descripción", enabled: true },
+    { id: 2, label: "Refinar", enabled: isStep2Enabled },
+    { id: 3, label: "Generar JSON", enabled: isStep3Enabled },
+    { id: 4, label: "Vista previa", enabled: isStep4Enabled },
+  ] as const;
+
+  const stepContent = (() => {
+    const goToGeneration = () => {
+      if (isStep3Enabled) {
+        setActiveWizardStep(3);
+      }
+    };
+
+    const skipRefinement = () => {
+      setRefinementFeedback("");
+      setStep2Error(null);
+      setStep2Message("Se mantiene la propuesta original.");
+      goToGeneration();
+    };
+
+    switch (activeWizardStep) {
+      case 1: {
+        const proposalPreview = createdDraft?.currentProposal ?? currentProposal;
+
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="uppercase text-[10px] text-zinc-500">
+                Descripción del escenario
+              </label>
+              <textarea
+                value={draftDescription}
+                onChange={handleDraftDescriptionChange}
+                placeholder="Describe un nuevo flujo o proceso para crear un escenario…"
+                className="w-full min-h-[96px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
+              />
+              <p className="text-zinc-500 text-[10px]">
+                Usa frases en castellano. Te propondremos dominios y eventos.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleCreateDraft}
+                disabled={isCreatingDraft}
+                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Crear borrador
+              </button>
+              {isCreatingDraft ? (
+                <span className="text-green-400 text-[10px]">
+                  Generando propuesta inicial…
+                </span>
+              ) : null}
+            </div>
+            {step1Error ? (
+              <div className="text-red-400 text-[10px]">{step1Error}</div>
+            ) : null}
+            {proposalPreview ? (
+              <div className="border border-zinc-800 rounded px-3 py-3 bg-zinc-900 space-y-2">
+                <div className="uppercase text-[10px] text-zinc-500">
+                  Resumen preliminar
+                </div>
+                <div className="space-y-1 text-[11px]">
+                  <div>
+                    <span className="text-zinc-500">ID del borrador:</span>{" "}
+                    <span className="text-green-400">
+                      {createdDraft?.id ?? draftSummary?.id ?? "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500">Nombre sugerido:</span>{" "}
+                    <span className="text-green-400">
+                      {proposalPreview.name || "—"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-zinc-500">Dominios:</span>{" "}
+                    <span className="text-zinc-300">
+                      {proposalPreview.domains.length > 0
+                        ? proposalPreview.domains.join(", ")
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-zinc-500">Eventos clave:</div>
+                    {proposalPreview.events.length > 0 ? (
+                      <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
+                        {proposalPreview.events.map((event, index) => (
+                          <li key={`step1-event-${index}`}>
+                            <span className="text-green-400">{event.title}</span>
+                            {event.description ? (
+                              <span className="text-zinc-500">
+                                {" "}— {event.description}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="text-zinc-500">—</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            <div className="border-t border-zinc-800 pt-3 space-y-2">
+              <span className="uppercase text-[10px] text-zinc-500">
+                Cargar borrador existente
+              </span>
+              <form
+                onSubmit={handleLoadDraftSummary}
+                className="flex flex-wrap items-center gap-2"
+              >
+                <input
+                  value={existingDraftIdInput}
+                  onChange={handleExistingDraftIdChange}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 rounded min-w-[220px]"
+                />
+                <button
+                  type="submit"
+                  disabled={isDraftLoading || isDraftActionPending}
+                  className="px-2 py-1 rounded border border-zinc-600 text-xs hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  Ver resumen
+                </button>
+              </form>
+              {isDraftLoading ? (
+                <div className="text-zinc-500 text-[10px]">
+                  Cargando borrador…
+                </div>
+              ) : null}
+            </div>
+          </div>
+        );
+      }
+      case 2: {
+        if (!isStep2Enabled) {
+          return (
+            <div className="text-zinc-500 text-[10px]">
+              Crea o carga un borrador para revisar la propuesta.
+            </div>
+          );
+        }
+
+        const proposal = currentProposal;
+
+        return (
+          <div className="space-y-4">
+            <div className="border border-zinc-800 rounded px-3 py-3 bg-zinc-900 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="uppercase text-[10px] text-zinc-500">
+                  Propuesta actual
+                </span>
+                <span className="text-[10px] text-zinc-500">
+                  Estado: {" "}
+                  <span className="text-green-400">
+                    {draftSummary?.status ?? createdDraft?.status ?? "desconocido"}
+                  </span>
+                </span>
+              </div>
+              {draftSummary?.guidance ? (
+                <div className="text-zinc-400 text-[10px]">
+                  {draftSummary.guidance}
+                </div>
+              ) : null}
+              <div className="space-y-1 text-[11px]">
+                <div>
+                  <span className="text-zinc-500">Nombre sugerido:</span>{" "}
+                  <span className="text-green-400">
+                    {proposal?.name ?? "—"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-zinc-500">Dominios:</span>{" "}
+                  <span className="text-zinc-300">
+                    {proposal && proposal.domains.length > 0
+                      ? proposal.domains.join(", ")
+                      : "—"}
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <div className="text-zinc-500">Eventos clave:</div>
+                  {proposal && proposal.events.length > 0 ? (
+                    <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
+                      {proposal.events.map((event, index) => (
+                        <li key={`step2-event-${index}`}>
+                          <span className="text-green-400">{event.title}</span>
+                          {event.description ? (
+                            <span className="text-zinc-500">
+                              {" "}— {event.description}
+                            </span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-zinc-500">—</div>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <div className="text-zinc-500">Preguntas abiertas:</div>
+                  {proposal && proposal.openQuestions.length > 0 ? (
+                    <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
+                      {proposal.openQuestions.map((question, index) => (
+                        <li key={`step2-question-${index}`}>{question}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="text-zinc-500">—</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            {isDraftLoading ? (
+              <div className="text-zinc-500 text-[10px]">
+                Actualizando resumen del borrador…
+              </div>
+            ) : null}
+            {step2Error ? (
+              <div className="text-red-400 text-[10px]">{step2Error}</div>
+            ) : null}
+            {step2Message ? (
+              <div className="text-green-400 text-[10px]">{step2Message}</div>
+            ) : null}
+            <div className="space-y-2">
+              <label className="uppercase text-[10px] text-zinc-500">
+                Feedback de refinado
+              </label>
+              <textarea
+                value={refinementFeedback}
+                onChange={handleRefinementFeedbackChange}
+                placeholder="Introduce mejoras o feedback..."
+                disabled={isRefiningDraft}
+                className="w-full min-h-[72px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600 disabled:opacity-50"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefineDraft}
+                  disabled={!draftSummary || !canSubmitRefinement || isRefiningDraft}
+                  className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Refinar propuesta
+                </button>
+                <button
+                  type="button"
+                  onClick={skipRefinement}
+                  disabled={isRefiningDraft}
+                  className="px-3 py-1.5 rounded border border-zinc-700 text-zinc-300 text-xs hover:bg-zinc-900/60"
+                >
+                  Saltar refinado
+                </button>
+                <button
+                  type="button"
+                  onClick={goToGeneration}
+                  disabled={!isStep3Enabled}
+                  className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50"
+                >
+                  Continuar a generación
+                </button>
+              </div>
+              {isRefiningDraft ? (
+                <div className="text-zinc-400 text-[10px]">Enviando feedback…</div>
+              ) : null}
+            </div>
+          </div>
+        );
+      }
+      case 3: {
+        if (!isStep3Enabled) {
+          return (
+            <div className="text-zinc-500 text-[10px]">
+              Finaliza el paso anterior antes de generar el JSON.
+            </div>
+          );
+        }
+
+        const statusLabel = isGeneratingJson || jsonStatus === "pending"
+          ? "En proceso"
+          : jsonStatus === "success"
+            ? "Generado"
+            : "Pendiente";
+        const preview = generatedScenario ?? draftSummary?.generatedScenarioPreview ?? null;
+
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={handleGenerateDraftJson}
+                disabled={isGeneratingJson || !draftSummary}
+                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Generar JSON del escenario
+              </button>
+              <div className="text-[10px] text-zinc-500">
+                Estado de generación: {" "}
+                <span className="text-green-400">{statusLabel}</span>
+              </div>
+              {isGeneratingJson ? (
+                <div className="text-green-400 text-[10px]">Generando JSON…</div>
+              ) : null}
+              {step3Error ? (
+                <div className="text-red-400 text-[10px]">{step3Error}</div>
+              ) : null}
+              {jsonStatus === "success" && !step3Error ? (
+                <div className="text-green-400 text-[10px]">
+                  JSON generado correctamente.
+                </div>
+              ) : null}
+            </div>
+            {preview ? (
+              <div className="space-y-2">
+                <div className="uppercase text-[10px] text-zinc-500">
+                  Vista rápida del JSON generado
+                </div>
+                <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-2 text-[10px] overflow-auto max-h-56 whitespace-pre-wrap">
+                  {formatJson(preview)}
+                </pre>
+                <button
+                  type="button"
+                  onClick={() => setActiveWizardStep(4)}
+                  className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60"
+                >
+                  Ir a vista previa
+                </button>
+              </div>
+            ) : null}
+          </div>
+        );
+      }
+      case 4: {
+        if (!isStep4Enabled) {
+          return (
+            <div className="text-zinc-500 text-[10px]">
+              Genera el JSON y márquelo como listo antes de aplicar el escenario.
+            </div>
+          );
+        }
+
+        const preview = generatedScenario ?? draftSummary?.generatedScenarioPreview ?? null;
+
+        return (
+          <div className="space-y-4">
+            <div className="border border-dashed border-zinc-700 rounded px-4 py-4 bg-zinc-900/60 space-y-2">
+              <div className="uppercase text-[10px] text-zinc-500">
+                Vista previa del flujo (SAGA)
+              </div>
+              <div className="text-zinc-300 text-[11px]">
+                Aquí se mostrará el diagrama de la SAGA generada antes de aprobarla.
+              </div>
+              {currentProposal?.name ? (
+                <div className="text-[10px] text-zinc-500">
+                  Escenario: <span className="text-green-400">{currentProposal.name}</span>
+                </div>
+              ) : null}
+            </div>
+            {preview ? (
+              <div className="space-y-2">
+                <div className="uppercase text-[10px] text-zinc-500">
+                  Definición generada
+                </div>
+                <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-2 text-[10px] overflow-auto max-h-64 whitespace-pre-wrap">
+                  {formatJson(preview)}
+                </pre>
+              </div>
+            ) : null}
+            {step4Error ? (
+              <div className="text-red-400 text-[10px]">{step4Error}</div>
+            ) : null}
+            {step4Message ? (
+              <div className="text-green-400 text-[10px]">{step4Message}</div>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleMarkDraftReady}
+                disabled={!canMarkReady || isMarkingReady}
+                className="px-3 py-1.5 rounded border border-yellow-600 text-yellow-300 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Marcar listo
+              </button>
+              <button
+                type="button"
+                onClick={handleApplyDraft}
+                disabled={!canApplyDraft || isApplyingDraft}
+                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Aplicar escenario
+              </button>
+            </div>
+            {isMarkingReady ? (
+              <div className="text-zinc-400 text-[10px]">Marcando borrador como listo…</div>
+            ) : null}
+            {isApplyingDraft ? (
+              <div className="text-green-400 text-[10px]">Aplicando escenario…</div>
+            ) : null}
+          </div>
+        );
+      }
+      default:
+        return null;
+    }
+  })();
 
   const scenarioOptions = useMemo(() => {
     const map = new Map<string, ScenarioListItem>();
@@ -691,180 +1222,39 @@ export default function App() {
       {isNewScenarioOpen ? (
         <div
           id="new-scenario-panel"
-          className="px-3 py-3 space-y-3 border-t border-zinc-800"
+          className="px-3 py-3 space-y-4 border-t border-zinc-800"
         >
-          <div className="space-y-2">
-            <textarea
-              value={draftDescription}
-              onChange={handleDraftDescriptionChange}
-              placeholder="Describe un nuevo flujo o proceso para crear un escenario…"
-              className="w-full min-h-[96px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
-            />
-            <p className="text-zinc-500 text-[10px]">
-              Usa frases en castellano. Te propondremos dominios y eventos.
-            </p>
-            <button
-              type="button"
-              onClick={handleCreateDraft}
-              disabled={isCreatingDraft}
-              className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              crear draft
-            </button>
-            <div className="space-y-2 text-[10px]">
-              {isCreatingDraft ? (
-                <div className="text-green-400">generando propuesta inicial…</div>
-              ) : null}
-              {createDraftError ? (
-                <div className="text-red-400">{createDraftError}</div>
-              ) : null}
-              {createdDraft ? (
-                <div className="border border-zinc-800 rounded px-3 py-2 bg-zinc-900 space-y-1">
-                  <div>
-                    <span className="text-zinc-500">Draft creado:</span>{" "}
-                    <span className="text-green-400">{createdDraft.id}</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500">Dominios sugeridos:</span>{" "}
-                    <span className="text-zinc-300">
-                      {createdDraft.currentProposal.domains.length > 0
-                        ? createdDraft.currentProposal.domains.join(", ")
-                        : "—"}
-                    </span>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-zinc-500">Eventos clave:</div>
-                    {createdDraft.currentProposal.events.length > 0 ? (
-                      <ul className="list-disc pl-4 space-y-0.5 text-zinc-300">
-                        {createdDraft.currentProposal.events.map((event, index) => (
-                          <li key={`${createdDraft.id}-event-${index}`}>
-                            <span className="text-green-400">{event.title}</span>
-                            {event.description ? (
-                              <span className="text-zinc-500"> — {event.description}</span>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <div className="text-zinc-500">—</div>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {wizardSteps.map((step) => {
+              const isActive = activeWizardStep === step.id;
+              const baseClasses =
+                "px-3 py-1.5 rounded border uppercase tracking-wide transition-colors";
+              const stateClasses = step.enabled
+                ? isActive
+                  ? "border-green-600 text-green-400 bg-zinc-900"
+                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-900/60"
+                : "border-zinc-800 text-zinc-600 cursor-not-allowed opacity-50";
+
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  onClick={() => {
+                    if (step.enabled) {
+                      setActiveWizardStep(step.id);
+                    }
+                  }}
+                  disabled={!step.enabled}
+                  className={`${baseClasses} ${stateClasses}`}
+                >
+                  [{step.id} {step.label}]
+                </button>
+              );
+            })}
           </div>
-          <form
-            onSubmit={handleLoadDraftSummary}
-            className="flex flex-wrap items-center gap-2"
-          >
-            <label className="uppercase tracking-wide text-zinc-500">
-              draft id
-            </label>
-            <input
-              value={draftIdInput}
-              onChange={handleDraftIdChange}
-              placeholder="00000000-0000-0000-0000-000000000000"
-              className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 rounded min-w-[220px]"
-            />
-            <button
-              type="submit"
-              disabled={isDraftLoading || isDraftActionPending}
-              className="px-2 py-1 rounded border border-zinc-600 text-xs hover:bg-zinc-800 disabled:opacity-50"
-            >
-              ver resumen
-            </button>
-            <button
-              type="button"
-              onClick={handleGenerateDraftJson}
-              disabled={!draftSummary || isDraftLoading || isDraftActionPending}
-              className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
-            >
-              Generar JSON
-            </button>
-            <button
-              type="button"
-              onClick={handleMarkDraftReady}
-              disabled={!draftSummary || !canMarkReady || isDraftActionPending}
-              className="px-2 py-1 rounded border border-yellow-600 text-xs text-yellow-300 hover:bg-zinc-800 disabled:opacity-50"
-            >
-              marcar listo
-            </button>
-            <button
-              type="button"
-              onClick={handleApplyDraft}
-              disabled={!draftSummary || !canApplyDraft || isDraftActionPending}
-              className="px-2 py-1 rounded border border-green-600 text-xs text-green-400 hover:bg-zinc-800 disabled:opacity-50"
-            >
-              aplicar escenario
-            </button>
-          </form>
-          <div className="space-y-1 text-[10px]">
-            {draftError ? (
-              <div className="text-red-400">{draftError}</div>
-            ) : null}
-            {draftInfoMessage ? (
-              <div className="text-zinc-400">{draftInfoMessage}</div>
-            ) : null}
-            {draftSuccessMessage ? (
-              <div className="text-green-400">{draftSuccessMessage}</div>
-            ) : null}
-            {isDraftLoading ? (
-              <div className="text-zinc-500">cargando resumen…</div>
-            ) : null}
+          <div className="border border-zinc-800 rounded px-3 py-3 bg-zinc-950/60">
+            {stepContent}
           </div>
-          {draftSummary ? (
-            <div className="space-y-3">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1">
-                  <div>
-                    <span className="text-zinc-500">estado:</span>{" "}
-                    <span className="text-green-400">{draftSummary.status}</span>
-                  </div>
-                  <div className="text-zinc-400">
-                    {draftSummary.guidance ??
-                      "Valida el contenido antes de aplicar el escenario."}
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <div className="uppercase text-zinc-500">propuesta actual</div>
-                  <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-48 whitespace-pre-wrap">
-                    {formatJson(draftSummary.currentProposal)}
-                  </pre>
-                </div>
-                {draftSummary.hasGeneratedScenario ? (
-                  <div className="space-y-1 md:col-span-2">
-                    <div className="uppercase text-zinc-500">json generado</div>
-                    <pre className="bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-[10px] overflow-auto max-h-56 whitespace-pre-wrap">
-                      {formatJson(draftSummary.generatedScenarioPreview)}
-                    </pre>
-                  </div>
-                ) : (
-                  <div className="text-zinc-500 md:col-span-2">
-                    Genera el JSON del escenario para poder aplicarlo.
-                  </div>
-                )}
-              </div>
-              <div className="space-y-2">
-                <textarea
-                  value={refinementFeedback}
-                  onChange={handleRefinementFeedbackChange}
-                  placeholder="Introduce mejoras o feedback..."
-                  disabled={!draftSummary || isDraftActionPending}
-                  className="w-full min-h-[72px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600 disabled:opacity-50"
-                />
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleRefineDraft}
-                    disabled={!draftSummary || !canSubmitRefinement || isDraftActionPending}
-                    className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Refinar propuesta
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
     </section>
@@ -942,6 +1332,46 @@ function formatJson(value: unknown): string {
   } catch (error) {
     return String(value);
   }
+}
+
+function parseScenarioProposal(value: unknown): ScenarioProposal | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const name = typeof record.name === "string" ? record.name : "";
+  const domains = Array.isArray(record.domains)
+    ? record.domains.filter((domain): domain is string => typeof domain === "string")
+    : [];
+  const events = Array.isArray(record.events)
+    ? record.events
+        .filter(
+          (event): event is Record<string, unknown> =>
+            Boolean(event) && typeof event === "object",
+        )
+        .map((event, index) => {
+          const eventRecord = event as Record<string, unknown>;
+          const title =
+            typeof eventRecord.title === "string"
+              ? eventRecord.title
+              : `Evento ${index + 1}`;
+          const description =
+            typeof eventRecord.description === "string"
+              ? eventRecord.description
+              : "";
+          return { title, description };
+        })
+    : [];
+  const sagaSummary =
+    typeof record.sagaSummary === "string" ? record.sagaSummary : "";
+  const openQuestions = Array.isArray(record.openQuestions)
+    ? record.openQuestions.filter(
+        (question): question is string => typeof question === "string",
+      )
+    : [];
+
+  return { name, domains, events, sagaSummary, openQuestions };
 }
 
 function buildBootstrapCurl(
