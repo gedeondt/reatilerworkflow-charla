@@ -1,8 +1,14 @@
 import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
-import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import {
+  ConfigurationError,
+  OpenAIRequestFailedError,
+  ensureOpenAI,
+  requestJsonContent,
+  type ChatCompletionMessageParam,
+} from './openaiClient.js';
 
 type DraftParams = { id: string };
 
@@ -11,8 +17,6 @@ type ScenarioDraftHistoryEntryType = 'initial' | 'refinement';
 type ScenarioJson = Record<string, unknown>;
 
 type ScenarioLanguage = 'es';
-
-type ChatCompletionMessageParam = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 
 const ScenarioEventSchema = z
   .object({
@@ -106,9 +110,6 @@ const generateJsonBodySchema = z
   .strict()
   .optional();
 
-const OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
-
-class ConfigurationError extends Error {}
 class InvalidModelResponseError extends Error {}
 class ScenarioJsonValidationError extends Error {
   details: string[];
@@ -119,42 +120,24 @@ class ScenarioJsonValidationError extends Error {
   }
 }
 
-class OpenAIRequestFailedError extends Error {}
-
 const app = Fastify({ logger: true });
 
 await app.register(cors, { origin: true });
 
-const createOpenAIClient = (): OpenAI => {
-  const apiKey = process.env.OPENAI_API_KEY;
-
-  if (!apiKey) {
-    throw new ConfigurationError(
-      'OPENAI_API_KEY es obligatorio para iniciar scenario-designer.',
-    );
+try {
+  ensureOpenAI();
+} catch (error) {
+  if (error instanceof ConfigurationError) {
+    app.log.error({ err: error }, error.message);
+    process.exit(1);
   }
 
-  return new OpenAI({ apiKey });
-};
-
-const openaiClient = (() => {
-  try {
-    return createOpenAIClient();
-  } catch (error) {
-    if (error instanceof ConfigurationError) {
-      app.log.error({ err: error }, error.message);
-      process.exit(1);
-    }
-
-    throw error;
-  }
-})();
-
-const ensureOpenAI = (): OpenAI => openaiClient;
+  throw error;
+}
 
 const extractModelResponse = (content: string | null | undefined): ModelDraftResponse => {
   if (!content) {
-    throw new InvalidModelResponseError('Model returned an empty response.');
+    throw new InvalidModelResponseError('El modelo devolvió una respuesta vacía.');
   }
 
   let parsed: unknown;
@@ -162,47 +145,47 @@ const extractModelResponse = (content: string | null | undefined): ModelDraftRes
   try {
     parsed = JSON.parse(content);
   } catch (error) {
-    throw new InvalidModelResponseError('Model response could not be parsed as JSON.');
+    throw new InvalidModelResponseError('La respuesta del modelo no se pudo interpretar como JSON.');
   }
 
   const validation = DraftResponseSchema.safeParse(parsed);
   if (!validation.success) {
-    throw new InvalidModelResponseError('Model response did not match the expected schema.');
+    throw new InvalidModelResponseError('La respuesta del modelo no coincide con el esquema esperado.');
   }
 
   return validation.data;
 };
 
-const initialPrompt = (description: string): string => `You are an assistant that designs high-level retail scenarios for an engineering team.
+const initialPrompt = (description: string): string => `Eres un asistente especializado en diseñar borradores estructurados de escenarios retail para un equipo de ingeniería.
 
-Read the user's description and produce a structured draft without taking any action.
+Lee la descripción proporcionada por la persona usuaria y genera un borrador organizado sin ejecutar acciones.
 
-Follow these rules strictly:
-- Only propose a single scenario.
-- Keep the scenario name in kebab-case with concise wording.
-- Suggest between 3 and 7 relevant business domains.
-- Suggest between 5 and 20 key events in chronological order. Each event must include a short "title" and a "description" explaining why it matters.
-- Write a short sagaSummary (2-4 sentences) that explains the flow end-to-end in natural language.
-- List openQuestions capturing unclear requirements. Use an empty array when everything is clear.
-- Do not invent API endpoints, commands, or JSON schemas.
-- Never mention activating scenarios or generating final JSON.
-- Respond only with JSON.
+Sigue estas reglas de forma estricta:
+- Propón únicamente un escenario.
+- Mantén el nombre del escenario en kebab-case con palabras concisas.
+- Sugiere entre 3 y 7 dominios de negocio relevantes.
+- Sugiere entre 5 y 20 eventos clave en orden cronológico. Cada evento debe incluir un campo "title" breve y una "description" que explique por qué es importante.
+- Escribe un campo sagaSummary de 2 a 4 frases que describa el flujo completo en lenguaje natural.
+- Enumera openQuestions con los puntos que sigan poco claros. Usa un array vacío si todo está claro.
+- No inventes endpoints de API, comandos ni esquemas JSON.
+- No menciones la activación de escenarios ni la generación del JSON final.
+- Responde únicamente con JSON.
 
-Return a JSON object that matches this structure:
+Devuelve un objeto JSON con la estructura:
 {
   "proposal": {
-    "name": "kebab-case-name",
-    "domains": ["domain-1", "domain-2"],
+    "name": "nombre-en-kebab-case",
+    "domains": ["dominio-1", "dominio-2"],
     "events": [
-      { "title": "event-title", "description": "brief explanation" }
+      { "title": "titulo-del-evento", "description": "explicación breve" }
     ],
-    "sagaSummary": "short overview",
-    "openQuestions": ["question-one"]
+    "sagaSummary": "resumen corto",
+    "openQuestions": ["pregunta-uno"]
   },
-  "modelNote": "Short summary of how you interpreted the description"
+  "modelNote": "Resumen breve de cómo interpretaste la descripción"
 }
 
-User description:
+Descripción proporcionada por la persona usuaria:
 """
 ${description}
 """`;
@@ -211,28 +194,28 @@ const refinementPrompt = (
   description: string,
   currentProposal: ScenarioProposal,
   feedback: string,
-): string => `You previously proposed the following scenario draft for a retail workflow:
+): string => `Anteriormente propusiste el siguiente borrador de escenario para un flujo retail:
 ${JSON.stringify(currentProposal, null, 2)}
 
-The original description from the user was:
+La descripción original de la persona usuaria fue:
 """
 ${description}
 """
 
-The user has provided new feedback:
+La persona usuaria ha aportado nuevo feedback:
 """
 ${feedback}
 """
 
-Update the proposal while keeping the structure consistent.
+Actualiza la propuesta manteniendo la estructura consistente.
 
-Apply these instructions carefully:
-- Keep field names identical to the provided structure.
-- Preserve the existing scenario name unless the feedback explicitly requests a rename.
-- Adjust domains, events, sagaSummary, and openQuestions to reflect the feedback without losing previously valid insights.
-- Maintain chronological ordering of events and make sure each has a title and description.
-- Respond only with JSON in the same structure as before, including a concise modelNote summarising the changes.
-- Do not generate any final JSON for downstream systems or mention activating scenarios.`;
+Sigue estas instrucciones con cuidado:
+- Mantén los nombres de los campos idénticos a la estructura proporcionada.
+- Conserva el nombre del escenario salvo que el feedback pida un cambio explícito.
+- Ajusta dominios, eventos, sagaSummary y openQuestions para reflejar el feedback sin perder los aciertos previos.
+- Mantén los eventos en orden cronológico y asegúrate de que cada uno incluya title y description.
+- Responde únicamente con JSON en la misma estructura anterior, incluyendo un modelNote conciso que resuma los cambios.
+- No generes JSON final para sistemas posteriores ni menciones la activación del escenario.`;
 
 const scenarioJsonPrompt = (draft: ScenarioDraft, language: ScenarioLanguage): string => {
   const proposalSummary = JSON.stringify(draft.currentProposal, null, 2);
@@ -278,32 +261,9 @@ const scenarioJsonPrompt = (draft: ScenarioDraft, language: ScenarioLanguage): s
 
 const requestOpenAIContent = async (
   messages: ChatCompletionMessageParam[],
-): Promise<string> => {
-  const client = ensureOpenAI();
-
-  try {
-    const completion = await client.chat.completions.create({
-      model: OPENAI_MODEL,
-      temperature: 0.1,
-      response_format: { type: 'json_object' },
-      messages,
-    });
-
-    const content = completion.choices[0]?.message?.content;
-
-    if (!content) {
-      throw new OpenAIRequestFailedError('La respuesta del modelo estuvo vacía.');
-    }
-
-    return content;
-  } catch (error) {
-    if (error instanceof OpenAIRequestFailedError) {
-      throw error;
-    }
-
-    throw new OpenAIRequestFailedError('No se pudo completar la solicitud a OpenAI.');
-  }
-};
+  temperature = 0.1,
+): Promise<string> =>
+  requestJsonContent({ messages, temperature });
 
 const domainHasInteraction = (domain: Record<string, unknown>): boolean => {
   const interactionKeys = [
@@ -472,35 +432,25 @@ const generateScenarioJson = async (draft: ScenarioDraft, language: ScenarioLang
 };
 
 const callOpenAI = async (prompt: string): Promise<ModelDraftResponse> => {
-  const client = ensureOpenAI();
-
   try {
-    const completion = await client.chat.completions.create({
-      model: OPENAI_MODEL,
+    const content = await requestJsonContent({
+      messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
-        {
-          role: 'system',
-          content:
-            'You are a focused assistant that proposes structured drafts for retail workflow scenarios. Keep responses deterministic and format them as strict JSON.',
-        },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ],
     });
 
-    const content = completion.choices[0]?.message?.content;
     return extractModelResponse(content);
   } catch (error) {
     if (error instanceof ConfigurationError || error instanceof InvalidModelResponseError) {
       throw error;
     }
 
-    app.log.error({ err: error }, 'OpenAI request failed');
-    throw new InvalidModelResponseError('Model request failed unexpectedly.');
+    if (error instanceof OpenAIRequestFailedError) {
+      app.log.error({ err: error }, 'Fallo en la petición a OpenAI');
+      throw new InvalidModelResponseError('La solicitud al modelo falló de forma inesperada.');
+    }
+
+    app.log.error({ err: error }, 'Fallo en la petición a OpenAI');
+    throw new InvalidModelResponseError('La solicitud al modelo falló de forma inesperada.');
   }
 };
 
@@ -513,15 +463,19 @@ const handleModelError = (error: unknown, reply: FastifyReply) => {
     return reply.status(502).send({ message: error.message });
   }
 
-  app.log.error({ err: error }, 'Unexpected error while handling model response');
-  return reply.status(502).send({ message: 'Failed to generate scenario proposal.' });
+  app.log.error({ err: error }, 'Error inesperado al manejar la respuesta del modelo');
+  return reply
+    .status(502)
+    .send({ message: 'No se pudo generar la propuesta del escenario.' });
 };
 
 app.post<{ Body: unknown }>('/scenario-drafts', async (request, reply) => {
   const parsedBody = createDraftBodySchema.safeParse(request.body);
 
   if (!parsedBody.success) {
-    return reply.status(400).send({ message: 'Invalid request body.', issues: parsedBody.error.issues });
+    return reply
+      .status(400)
+      .send({ message: 'Cuerpo de la solicitud inválido.', issues: parsedBody.error.issues });
   }
 
   const { description } = parsedBody.data;
@@ -557,13 +511,17 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/refine', 
   const parsedBody = refineDraftBodySchema.safeParse(request.body);
 
   if (!parsedBody.success) {
-    return reply.status(400).send({ message: 'Invalid request body.', issues: parsedBody.error.issues });
+    return reply
+      .status(400)
+      .send({ message: 'Cuerpo de la solicitud inválido.', issues: parsedBody.error.issues });
   }
 
   const draft = drafts.get(id);
 
   if (!draft) {
-    return reply.status(404).send({ message: 'Scenario draft not found.' });
+    return reply
+      .status(404)
+      .send({ message: 'No se encontró el borrador del escenario.' });
   }
 
   const { feedback } = parsedBody.data;
@@ -594,13 +552,15 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
   if (!parsedBody.success) {
     return reply
       .status(400)
-      .send({ message: 'Invalid request body.', issues: parsedBody.error.issues });
+      .send({ message: 'Cuerpo de la solicitud inválido.', issues: parsedBody.error.issues });
   }
 
   const draft = drafts.get(id);
 
   if (!draft) {
-    return reply.status(404).send({ message: 'Scenario draft not found.' });
+    return reply
+      .status(404)
+      .send({ message: 'No se encontró el borrador del escenario.' });
   }
 
   const language: ScenarioLanguage = (parsedBody.data?.language ?? 'es') as ScenarioLanguage;
@@ -632,7 +592,7 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
         .send({ error: 'openai_request_failed', message: error.message });
     }
 
-    app.log.error({ err: error }, 'Failed to generate scenario JSON');
+    app.log.error({ err: error }, 'Error al generar el JSON del escenario');
     return reply
       .status(502)
       .send({
@@ -649,7 +609,7 @@ app.get<{ Params: DraftParams }>('/scenario-drafts/:id/summary', async (request,
   if (!draft) {
     return reply
       .status(404)
-      .send({ error: 'draft_not_found', message: 'Scenario draft not found.' });
+      .send({ error: 'draft_not_found', message: 'No se encontró el borrador del escenario.' });
   }
 
   return reply.send(buildDraftSummary(draft));
@@ -662,13 +622,13 @@ app.post<{ Params: DraftParams }>('/scenario-drafts/:id/mark-ready', async (requ
   if (!draft) {
     return reply
       .status(404)
-      .send({ error: 'draft_not_found', message: 'Scenario draft not found.' });
+      .send({ error: 'draft_not_found', message: 'No se encontró el borrador del escenario.' });
   }
 
   if (!draft.generatedScenario) {
     return reply.status(400).send({
       error: 'scenario_not_generated',
-      message: 'Generate the scenario JSON before marking the draft as ready.',
+      message: 'Genera el JSON del escenario antes de marcar el borrador como listo.',
     });
   }
 
@@ -682,7 +642,9 @@ app.get<{ Params: DraftParams }>('/scenario-drafts/:id', async (request, reply) 
   const draft = drafts.get(id);
 
   if (!draft) {
-    return reply.status(404).send({ message: 'Scenario draft not found.' });
+    return reply
+      .status(404)
+      .send({ message: 'No se encontró el borrador del escenario.' });
   }
 
   return reply.send(draft);
@@ -693,13 +655,15 @@ app.get<{ Params: DraftParams }>('/scenario-drafts/:id/json', async (request, re
   const draft = drafts.get(id);
 
   if (!draft) {
-    return reply.status(404).send({ message: 'Scenario draft not found.' });
+    return reply
+      .status(404)
+      .send({ message: 'No se encontró el borrador del escenario.' });
   }
 
   if (!draft.generatedScenario) {
     return reply
       .status(404)
-      .send({ message: 'Generated scenario JSON not found for this draft.' });
+      .send({ message: 'No se encontró JSON generado para este borrador.' });
   }
 
   return reply.send(draft.generatedScenario.content);
@@ -715,6 +679,6 @@ try {
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info(`[scenario-designer] listening on http://localhost:${port}`);
 } catch (error) {
-  app.log.error({ err: error }, 'Failed to start scenario-designer');
+  app.log.error({ err: error }, 'No se pudo iniciar scenario-designer');
   process.exit(1);
 }

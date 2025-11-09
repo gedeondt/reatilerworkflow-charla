@@ -81,3 +81,9 @@ export type DraftCreationResponse = {
     createdAt: string;
   };
 };
+
+export type GenerateJsonResponse = {
+  id: string;
+  status: 'generated';
+  generatedScenario: Record<string, unknown>;
+};
