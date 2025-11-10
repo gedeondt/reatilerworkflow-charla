@@ -16,8 +16,9 @@ export type ScenarioDraftSummary = {
 };
 
 export const scenarioDslRules = `
-Genera siempre un JSON con esta forma:
+El escenario debe seguir al pie de la letra el contrato de @reatiler/saga-kernel.scenarioSchema.
 
+La forma general es:
 {
   "name": string,
   "version": number,
@@ -27,22 +28,12 @@ Genera siempre un JSON con esta forma:
   "events": [
     {
       "name": string,
-      "fields"?: {
-        [fieldName: string]:
-          | "text"
-          | "number"
-          | "boolean"
-          | "datetime"
-          | {
-              "type": "array",
-              "items": {
-                [subField: string]:
-                  | "text"
-                  | "number"
-                  | "boolean"
-                  | "datetime"
-              }
-            }
+      "payloadSchema": {
+        "<campo>":
+          | "string" | "number" | "boolean"
+          | "string[]" | "number[]" | "boolean[]"
+          | { "<subcampo>": ... } // objeto plano con tipos primitivos
+          | [ { "<subcampo>": ... } ] // array de objetos planos
       }
     }
   ],
@@ -58,19 +49,23 @@ Genera siempre un JSON con esta forma:
           "type": "emit",
           "event": string,
           "toDomain": string,
-          "mode"?: "AUTO",
-          "map"?: {
-            [destField: string]:
-              | string
-              | { "const": unknown }
+          "mapping": {
+            "<campo>":
+              | string // copia directa de un campo del payload recibido
+              | { "from": string } // alias para campos del payload recibido
+              | { "const": string | number | boolean } // constantes escalares
               | {
-                  "from": string,
-                  "item": {
-                    [itemDestField: string]:
-                      | string
-                      | { "const": unknown }
+                  "objectFrom"?: string,
+                  "map": {
+                    "<campo>": string | { "from": string } | { "const": string | number | boolean }
                   }
-                }
+                } // para construir objetos a partir de objetos anidados
+              | {
+                  "arrayFrom": string,
+                  "map": {
+                    "<campo>": string | { "from": string } | { "const": string | number | boolean }
+                  }
+                } // para mapear arrays de objetos
           }
         }
       ]
@@ -78,11 +73,12 @@ Genera siempre un JSON con esta forma:
   ]
 }
 
-Reglas:
-- Usa SIEMPRE esta estructura.
-- "map" SOLO puede leer campos del payload del evento definido en "on.event".
-- No inventes claves como: payloadSchema, mapping, steps, lanes, actors, subscribesTo, sagaSummary, openQuestions, metadata.
-- Si la descripción no parece negocio real, genera una SAGA creativa pero respetando exactamente este DSL.
+Reglas estrictas:
+- Mantén EXACTAMENTE estas claves y tipos.
+- "payloadSchema" define los campos permitidos del payload del evento. Sólo acepta tipos primitivos, objetos planos o arrays de objetos planos según el schema real.
+- "mapping" en acciones emit SOLO puede usar campos existentes en el payload del evento de entrada o constantes escalares. Para objetos anidados utiliza objectFrom + map. Para arrays, usa arrayFrom + map.
+- No añadas claves no reconocidas por scenarioSchema (por ejemplo: fields, steps, lanes, actors, subscribesTo, sagaSummary, openQuestions, metadata, mode, item, etc.).
+- Si la descripción no corresponde a un negocio real, inventa una SAGA creativa pero válida siguiendo este mismo DSL.
 `.trim();
 
 export const scenarioJsonPrompt = (
@@ -97,7 +93,7 @@ ${scenarioDslRules}
 
 Instrucciones clave:
 - Lee la descripción inicial y la propuesta aprobada para comprender el proceso.
-- Si se trata de un proceso de negocio coherente, define dominios, eventos y listeners siguiendo el DSL.
+- Si se trata de un proceso de negocio coherente, define dominios, eventos y listeners siguiendo el DSL oficial.
 - Si el texto es absurdo o incoherente, inventa una SAGA creativa pero válida usando el mismo DSL.
 - Devuelve SOLO un JSON que cumpla ese esquema, sin comentarios ni texto adicional.
 - No uses claves prohibidas ni estructuras fuera del contrato.
@@ -183,7 +179,7 @@ Requisitos clave:
 - Usa un eventName coherente con los eventos definidos en el escenario.
 - Completa version, eventId, traceId, correlationId y occurredAt con ejemplos plausibles.
 - Incluye en data únicamente los campos imprescindibles para que la historia del escenario tenga sentido.
-- Asegúrate de que los campos del objeto data respeten los fields definidos para ese evento en el escenario.
+- Asegúrate de que los campos del objeto data respeten el payloadSchema del evento correspondiente en el escenario.
 
 Escenario de referencia:
 ${scenarioJson}`.trim();
