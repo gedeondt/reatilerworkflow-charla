@@ -16,6 +16,9 @@ export type LogEntry = {
   domain: string;
   eventName: string;
   occurredAt: string;
+  rawEvent: Record<string, unknown>;
+  queue?: string;
+  originalPayload?: unknown;
 };
 
 export type ScenarioResponse = {
