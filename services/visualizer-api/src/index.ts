@@ -32,13 +32,16 @@ type VisualizerEvent = {
   };
   eventName?: string;
   occurredAt?: string;
-};
+} & Record<string, unknown>;
 
 export type NormalizedVisualizerEvent = {
   traceId: string;
   domain: string;
   eventName: string;
   occurredAt: string;
+  rawEvent: Record<string, unknown>;
+  queue?: string;
+  originalPayload?: unknown;
 };
 
 type ScenarioBootstrapEvent = {
@@ -56,6 +59,9 @@ type LogEntry = {
   domain: string;
   eventName: string;
   occurredAt: string;
+  rawEvent: Record<string, unknown>;
+  queue?: string;
+  originalPayload?: unknown;
 };
 
 const QUEUE_BASE = process.env.QUEUE_BASE ?? 'http://localhost:3005';
@@ -811,12 +817,23 @@ const normalizeVisualizerPayload = (payload: unknown): NormalizedVisualizerEvent
     return null;
   }
 
-  return {
+  const rawEvent = { ...event } as Record<string, unknown>;
+
+  const normalized: NormalizedVisualizerEvent = {
     traceId: resolveTraceId(event),
     domain: resolveDomain(event, queue),
     eventName: resolveEventName(event),
     occurredAt: resolveOccurredAt(event),
+    rawEvent,
   };
+
+  if (queue) {
+    normalized.queue = queue;
+  }
+
+  normalized.originalPayload = payload;
+
+  return normalized;
 };
 
 export const applyEventToState = async (event: NormalizedVisualizerEvent): Promise<void> => {
@@ -882,6 +899,9 @@ const consumeLoop = async (): Promise<void> => {
           domain: normalized.domain,
           eventName: normalized.eventName,
           occurredAt: normalized.occurredAt,
+          rawEvent: normalized.rawEvent,
+          queue: normalized.queue,
+          originalPayload: normalized.originalPayload,
         });
       } catch (error) {
         app.log.error({ err: error }, 'failed to apply event to state');

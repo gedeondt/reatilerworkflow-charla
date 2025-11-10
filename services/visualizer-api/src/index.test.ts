@@ -45,6 +45,12 @@ describe('applyEventToState', () => {
       domain: 'payments',
       eventName: 'PaymentCreated',
       occurredAt,
+      rawEvent: {
+        traceId: 'trace-1',
+        domain: 'payments',
+        eventName: 'PaymentCreated',
+        occurredAt,
+      },
     });
 
     expect(mockedAxios.get).toHaveBeenCalledWith(
@@ -94,6 +100,12 @@ describe('applyEventToState', () => {
       domain: 'payments',
       eventName: 'PaymentSettled',
       occurredAt,
+      rawEvent: {
+        traceId: 'trace-1',
+        domain: 'payments',
+        eventName: 'PaymentSettled',
+        occurredAt,
+      },
     });
 
     expect(mockedAxios.put).toHaveBeenCalledTimes(1);
@@ -120,6 +132,12 @@ describe('applyEventToState', () => {
       domain: 'orders',
       eventName: 'OrderPlaced',
       occurredAt: '2024-01-01T00:00:00.000Z',
+      rawEvent: {
+        traceId: 'trace-123',
+        domain: 'orders',
+        eventName: 'OrderPlaced',
+        occurredAt: '2024-01-01T00:00:00.000Z',
+      },
     });
 
     expect(mockedAxios.get).toHaveBeenCalledWith(
@@ -131,7 +149,7 @@ describe('applyEventToState', () => {
 
 describe('normalizeVisualizerPayload', () => {
   it('normalizes an enveloped queue message', () => {
-    const result = __testing.normalizeVisualizerPayload({
+    const payload = {
       message: {
         queue: 'orders',
         message: {
@@ -140,47 +158,72 @@ describe('normalizeVisualizerPayload', () => {
           occurredAt: '2024-01-01T00:00:00.000Z',
         },
       },
-    });
+    };
+
+    const result = __testing.normalizeVisualizerPayload(payload);
 
     expect(result).toEqual({
       traceId: 'trace-1',
       domain: 'orders',
       eventName: 'OrderPlaced',
       occurredAt: '2024-01-01T00:00:00.000Z',
+      rawEvent: {
+        traceId: 'trace-1',
+        eventName: 'OrderPlaced',
+        occurredAt: '2024-01-01T00:00:00.000Z',
+      },
+      queue: 'orders',
+      originalPayload: payload,
     });
   });
 
   it('falls back to correlationId and UnknownEvent', () => {
-    const result = __testing.normalizeVisualizerPayload({
+    const payload = {
       message: {
         queue: 'payments',
         message: {
           correlationId: 'corr-123',
         },
       },
-    });
+    };
+
+    const result = __testing.normalizeVisualizerPayload(payload);
 
     expect(result).toEqual({
       traceId: 'corr-123',
       domain: 'payments',
       eventName: 'UnknownEvent',
       occurredAt: expect.any(String),
+      rawEvent: {
+        correlationId: 'corr-123',
+      },
+      queue: 'payments',
+      originalPayload: payload,
     });
   });
 
   it('handles already normalized events without envelope', () => {
-    const result = __testing.normalizeVisualizerPayload({
+    const payload = {
       eventName: 'StandaloneEvent',
       traceId: 'standalone-trace',
       occurredAt: '2024-02-02T00:00:00.000Z',
       domain: 'standalone',
-    });
+    };
+
+    const result = __testing.normalizeVisualizerPayload(payload);
 
     expect(result).toEqual({
       traceId: 'standalone-trace',
       domain: 'standalone',
       eventName: 'StandaloneEvent',
       occurredAt: '2024-02-02T00:00:00.000Z',
+      rawEvent: {
+        eventName: 'StandaloneEvent',
+        traceId: 'standalone-trace',
+        occurredAt: '2024-02-02T00:00:00.000Z',
+        domain: 'standalone',
+      },
+      originalPayload: payload,
     });
   });
 

@@ -1423,14 +1423,22 @@ type LogsPanelProps = {
 
 function LogsPanel({ logs }: LogsPanelProps) {
   const hasLogs = logs.length > 0;
+  const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
+
+  const handleCloseModal = useCallback(() => {
+    setSelectedEntry(null);
+  }, []);
+
   return (
     <div className="border-t border-zinc-800 bg-zinc-950 px-2 py-2 text-[11px] text-green-400 min-h-[96px] max-h-48 overflow-auto">
       {hasLogs ? (
         <div className="space-y-1">
           {logs.map((entry, index) => (
-            <div
+            <button
               key={`${entry.occurredAt}-${entry.traceId}-${index}`}
-              className="flex gap-2"
+              type="button"
+              className="flex w-full items-start gap-2 rounded px-1 py-1 text-left transition-colors hover:bg-zinc-900/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400/60"
+              onClick={() => setSelectedEntry(entry)}
             >
               <span className="text-zinc-500">
                 {formatLogTime(entry.occurredAt)}
@@ -1439,12 +1447,15 @@ function LogsPanel({ logs }: LogsPanelProps) {
               <span className="text-zinc-600">│</span>
               <span className="text-zinc-500">[{entry.domain}]</span>
               <span className="text-green-400">{entry.eventName}</span>
-            </div>
+            </button>
           ))}
         </div>
       ) : (
         <div className="text-zinc-600">waiting for events…</div>
       )}
+      {selectedEntry ? (
+        <LogEntryDetailModal entry={selectedEntry} onClose={handleCloseModal} />
+      ) : null}
     </div>
   );
 }
@@ -1456,4 +1467,111 @@ function formatLogTime(value: string): string {
   }
 
   return date.toLocaleTimeString();
+}
+
+type LogEntryDetailModalProps = {
+  entry: LogEntry;
+  onClose: () => void;
+};
+
+function LogEntryDetailModal({ entry, onClose }: LogEntryDetailModalProps) {
+  const eventDetails = useMemo(() => {
+    const details: Record<string, unknown> = {
+      traceId: entry.traceId,
+      domain: entry.domain,
+      eventName: entry.eventName,
+      occurredAt: entry.occurredAt,
+      rawEvent: entry.rawEvent,
+    };
+
+    if (entry.queue) {
+      details.queue = entry.queue;
+    }
+
+    if (entry.originalPayload !== undefined) {
+      details.originalPayload = entry.originalPayload;
+    }
+
+    return details;
+  }, [entry]);
+
+  const formattedJson = useMemo(() => safeStringify(eventDetails), [eventDetails]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="log-entry-detail-title"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-3xl rounded-lg border border-zinc-800 bg-zinc-950 text-green-300 shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between border-b border-zinc-800 px-4 py-3">
+          <div>
+            <h2 id="log-entry-detail-title" className="text-sm font-semibold text-green-200">
+              Detalle de evento
+            </h2>
+            <p className="text-xs text-zinc-400">
+              {entry.eventName} • {entry.domain} • {formatLogTime(entry.occurredAt)}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="text-xs font-medium text-zinc-400 transition-colors hover:text-green-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400/60"
+            autoFocus
+            onClick={onClose}
+          >
+            Cerrar
+          </button>
+        </div>
+        <div className="max-h-[70vh] overflow-auto px-4 py-3">
+          <pre className="whitespace-pre text-xs leading-5 font-mono text-green-200">
+            {formattedJson}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function safeStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+
+  try {
+    const serialized = JSON.stringify(
+      value,
+      (_key, val) => {
+        if (typeof val === "object" && val !== null) {
+          const objectValue = val as object;
+          if (seen.has(objectValue)) {
+            return "[Circular]";
+          }
+          seen.add(objectValue);
+        }
+        return val;
+      },
+      2,
+    );
+
+    return typeof serialized === "string" ? serialized : String(serialized);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(value);
+  }
 }
