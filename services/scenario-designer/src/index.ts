@@ -1,11 +1,7 @@
 import Fastify, { type FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { scenarioSchema, type Scenario } from '@reatiler/saga-kernel';
 import {
   ConfigurationError,
   OpenAIRequestFailedError,
@@ -13,6 +9,12 @@ import {
   requestJsonContent,
   type ChatCompletionMessageParam,
 } from './openaiClient.js';
+import {
+  inspectScenarioContract,
+  scenarioDslRules,
+  type ScenarioContract,
+  type ScenarioDslIssue,
+} from './scenarioContract.js';
 
 type DraftParams = { id: string };
 
@@ -71,8 +73,10 @@ type ScenarioDraftHistoryEntry = {
   timestamp: string;
 };
 
+type ScenarioJson = ScenarioContract;
+
 type GeneratedScenario = {
-  content: Scenario;
+  content: ScenarioJson;
   createdAt: string;
   bootstrapExample?: ScenarioBootstrapExample;
 };
@@ -89,18 +93,6 @@ type ScenarioDraft = {
 };
 
 const drafts = new Map<string, ScenarioDraft>();
-
-const moduleFilename = fileURLToPath(import.meta.url);
-const moduleDirname = dirname(moduleFilename);
-
-const scenarioDslReference = JSON.parse(
-  readFileSync(
-    resolve(moduleDirname, '../../..', 'business', 'retailer-happy-path.json'),
-    'utf8',
-  ),
-) as Scenario;
-
-const scenarioDslReferenceString = JSON.stringify(scenarioDslReference, null, 2);
 
 const buildDraftSummary = (draft: ScenarioDraft) => {
   const hasGeneratedScenario = Boolean(draft.generatedScenario);
@@ -143,12 +135,26 @@ const generateJsonBodySchema = z
 
 class InvalidModelResponseError extends Error {}
 class ScenarioBootstrapGenerationError extends Error {}
-class ScenarioJsonValidationError extends Error {
-  details: string[];
+class ModelOutputInvalidError extends Error {}
+class InvalidScenarioShapeError extends Error {
+  issues: string[];
+  missingFields?: string[];
+  invalidKeys?: string[];
 
-  constructor(details: string[]) {
-    super('Invalid scenario JSON');
-    this.details = details;
+  constructor(
+    message: string,
+    details: { issues?: string[]; missingFields?: string[]; invalidKeys?: string[] } = {},
+  ) {
+    super(message);
+    this.issues = details.issues ?? [];
+
+    if (details.missingFields && details.missingFields.length > 0) {
+      this.missingFields = details.missingFields;
+    }
+
+    if (details.invalidKeys && details.invalidKeys.length > 0) {
+      this.invalidKeys = details.invalidKeys;
+    }
   }
 }
 
@@ -254,31 +260,35 @@ Sigue estas instrucciones con cuidado:
 const scenarioJsonPrompt = (draft: ScenarioDraft, language: ScenarioLanguage): string => {
   const proposalSummary = JSON.stringify(draft.currentProposal, null, 2);
 
-  return `Genera la definición ejecutable del escenario retail en formato JSON.
-
-Debes respetar estrictamente el DSL utilizado por nuestro runner. Usa únicamente las claves y estructuras que aparecen en el siguiente ejemplo real, ajustando los valores según la propuesta actual:
-${scenarioDslReferenceString}
-
-Instrucciones obligatorias:
-- El objeto raíz debe incluir exactamente las propiedades name, version, domains, events y listeners.
-- Cada dominio debe tener exclusivamente los campos "id" y "queue".
-- Cada evento debe definir "name" y "payloadSchema".
-- \`payloadSchema\` solo puede usar los tipos primitivos \`string\`, \`number\`, \`boolean\`, sus variantes en array (\`string[]\`, \`number[]\`, \`boolean[]\`) u objetos planos de un nivel. También se admiten arrays de objetos planos. Está prohibido anidar objetos más allá de un nivel o crear arrays de arrays.
-- Utiliza \`payloadSchema: {}\` cuando un evento no requiera datos.
-- Cada listener debe definir "id", "on" (con "event"), opcionalmente "delayMs" y la lista "actions". Las acciones solo pueden ser de tipo "emit" (event, toDomain) o "set-state" (domain, status).
-- Cada acción "emit" debe incluir "mapping" siguiendo el DSL: escalares con alias o {"from"}, constantes con {"const"}, objetos planos con {"map": { ... }} y arrays de objetos con {"arrayFrom": ..., "map": { ... }}. Los arrays de primitivos solo admiten referencias directas.
-- No añadas ninguna propiedad adicional (por ejemplo sagaSummary, openQuestions, subscribesTo, publishes, metadata ni explicaciones).
-- Mantén la coherencia con los dominios y eventos descritos en la propuesta aprobada, adaptando nombres si el flujo lo requiere.
-- Redacta todos los identificadores y estados en español cuando sea pertinente.
-- Devuelve únicamente el JSON final sin comentarios ni texto adicional.
-
-Descripción inicial del reto:
-${draft.inputDescription}
-
-Propuesta actual aprobada:
-${proposalSummary}
-
-Idioma objetivo para cualquier texto descriptivo: ${language}.`.trim();
+  return [
+    'Genera un escenario SAGA JSON listo para ejecutarse a partir de la siguiente propuesta.',
+    '',
+    'Pasos obligatorios:',
+    '1. Identifica los dominios técnicos implicados y asigna colas explícitas.',
+    '2. Declara los eventos de negocio con sus campos usando el DSL REAL.',
+    '3. Define listeners que reaccionen a eventos y emitan otros eventos entre dominios.',
+    '4. Construye cada map usando únicamente campos disponibles en el evento que dispara el listener.',
+    '',
+    'DSL obligatorio:',
+    scenarioDslRules,
+    '',
+    'Reglas de salida:',
+    '- El objeto raíz debe contener solo { name, version, domains, events, listeners }.',
+    '- No añadas texto fuera del JSON ni claves diferentes a las del DSL.',
+    '- Mantén los identificadores en kebab-case o coherentes con la propuesta.',
+    '',
+    'Si la descripción no parece un proceso de negocio, inventa una SAGA creativa pero válida que respete el DSL.',
+    '',
+    'Descripción original:',
+    '"""',
+    draft.inputDescription,
+    '"""',
+    '',
+    'Propuesta aprobada actual:',
+    proposalSummary,
+    '',
+    `Idioma objetivo para nombres y textos descriptivos: ${language}.`,
+  ].join('\n');
 };
 
 const requestOpenAIContent = async (
@@ -287,53 +297,49 @@ const requestOpenAIContent = async (
 ): Promise<string> =>
   requestJsonContent({ messages, temperature });
 
-const scenarioBootstrapPrompt = (scenario: Scenario): string => {
+const scenarioBootstrapPrompt = (scenario: ScenarioJson): string => {
   const scenarioJson = JSON.stringify(scenario, null, 2);
 
-  return `Analiza el escenario descrito a continuación y prepara un único evento inicial para arrancar la SAGA.
-
-Responde exclusivamente con un objeto JSON que siga esta estructura exacta:
-{
-  "queue": "nombre-cola",
-  "event": {
-    "eventName": "...",
-    "version": 1,
-    "eventId": "evt-1",
-    "traceId": "trace-1",
-    "correlationId": "saga-1",
-    "occurredAt": "2025-01-01T00:00:00.000Z",
-    "data": { }
-  }
-}
-
-Requisitos clave:
-- Selecciona una cola (queue) que exista dentro de los dominios del escenario.
-- Usa un eventName coherente con los eventos definidos en el escenario.
-- Completa version, eventId, traceId, correlationId y occurredAt con ejemplos plausibles.
-- Incluye en data únicamente los campos imprescindibles para que la historia del escenario tenga sentido.
-- Asegúrate de que los campos del objeto data respeten el \`payloadSchema\` definido para ese evento.
-- No añadas explicaciones ni texto fuera del JSON.
-
-Escenario de referencia:
-${scenarioJson}`.trim();
+  return [
+    'Analiza el escenario descrito a continuación y prepara un único evento inicial para arrancar la SAGA.',
+    '',
+    'Responde exclusivamente con un objeto JSON que siga esta estructura exacta:',
+    '{',
+    '  "queue": "nombre-cola",',
+    '  "event": {',
+    '    "eventName": "...",',
+    '    "version": 1,',
+    '    "eventId": "evt-1",',
+    '    "traceId": "trace-1",',
+    '    "correlationId": "saga-1",',
+    '    "occurredAt": "2025-01-01T00:00:00.000Z",',
+    '    "data": { }',
+    '  }',
+    '}',
+    '',
+    'Requisitos clave:',
+    '- Selecciona una queue que exista dentro de los domains del escenario.',
+    '- Usa un eventName definido en la sección events.',
+    '- Completa version, eventId, traceId, correlationId y occurredAt con ejemplos plausibles.',
+    '- Incluye en data solo los campos imprescindibles y respeta los fields declarados para ese evento.',
+    '- No añadas explicaciones ni texto fuera del JSON.',
+    '',
+    'Escenario de referencia:',
+    scenarioJson,
+  ].join('\n');
 };
 
 const generateScenarioBootstrapExample = async (
-  scenario: Scenario,
+  scenario: ScenarioJson,
 ): Promise<ScenarioBootstrapExample> => {
   let response: string;
 
   try {
     response = await requestJsonContent({
-      messages: [
-        {
-          role: 'system',
-          content:
-            'Responde siempre en español. Ajusta la salida al DSL de escenarios definido en este proyecto. No añadas texto fuera del JSON.',
-        },
-        { role: 'user', content: scenarioBootstrapPrompt(scenario) },
-      ],
+      messages: [{ role: 'user', content: scenarioBootstrapPrompt(scenario) }],
       temperature: 0.2,
+      systemPrompt:
+        'Eres un asistente que escribe ejemplos de eventos en español y responde únicamente con JSON válido.',
     });
   } catch (error) {
     throw new ScenarioBootstrapGenerationError('No se pudo solicitar el bootstrap al modelo.');
@@ -364,50 +370,117 @@ const formatIssuePath = (path: (string | number)[]): string =>
     .join('')
     .replace(/^[.]/u, '');
 
-const formatSchemaIssues = (issues: z.ZodIssue[]): string[] =>
+const formatZodIssues = (error: z.ZodError<ScenarioContract>) => {
+  const missingFields = new Set<string>();
+  const invalidKeys = new Set<string>();
+
+  const issues = error.issues.map((issue) => {
+    const path = formatIssuePath(issue.path);
+
+    if (issue.code === 'invalid_type' && issue.received === 'undefined' && path) {
+      missingFields.add(path);
+    }
+
+    if (issue.code === 'unrecognized_keys') {
+      const basePath = path;
+
+      issue.keys.forEach((key) => {
+        const fullPath = basePath ? `${basePath}.${key}` : key;
+        invalidKeys.add(fullPath);
+      });
+    }
+
+    return path ? `${issue.message} (ruta: ${path})` : issue.message;
+  });
+
+  return {
+    issues,
+    missingFields: Array.from(missingFields),
+    invalidKeys: Array.from(invalidKeys),
+  };
+};
+
+const formatDslIssues = (issues: ScenarioDslIssue[]): string[] =>
   issues.map((issue) => {
     const path = formatIssuePath(issue.path);
     return path ? `${issue.message} (ruta: ${path})` : issue.message;
   });
 
-type ScenarioValidationResult =
-  | { type: 'ok'; scenario: Scenario }
-  | { type: 'json-error'; details: string }
-  | { type: 'schema-error'; issues: z.ZodIssue[] };
+type ScenarioEvaluationResult =
+  | { type: 'ok'; scenario: ScenarioJson }
+  | { type: 'model-output-error'; error: ModelOutputInvalidError }
+  | { type: 'shape-error'; error: InvalidScenarioShapeError };
 
-const evaluateScenarioResponse = (content: string): ScenarioValidationResult => {
+const evaluateScenarioResponse = (content: string): ScenarioEvaluationResult => {
   let parsed: unknown;
 
   try {
     parsed = JSON.parse(content) as unknown;
   } catch (error) {
     return {
-      type: 'json-error',
-      details: 'La respuesta del modelo no es JSON válido.',
+      type: 'model-output-error',
+      error: new ModelOutputInvalidError('La respuesta del modelo no es JSON válido.'),
     };
   }
 
-  const validation = scenarioSchema.safeParse(parsed);
+  const validation = inspectScenarioContract(parsed);
 
-  if (!validation.success) {
-    return { type: 'schema-error', issues: validation.error.issues };
+  if (validation.kind === 'schema-error') {
+    const { issues, missingFields, invalidKeys } = formatZodIssues(validation.error);
+    const error = new InvalidScenarioShapeError('El JSON no cumple el DSL REAL.', {
+      issues,
+      missingFields: missingFields.length > 0 ? missingFields : undefined,
+      invalidKeys: invalidKeys.length > 0 ? invalidKeys : undefined,
+    });
+
+    return { type: 'shape-error', error };
   }
 
-  return { type: 'ok', scenario: validation.data };
+  if (validation.issues.length > 0) {
+    const error = new InvalidScenarioShapeError('El JSON no cumple el DSL REAL.', {
+      issues: formatDslIssues(validation.issues),
+    });
+
+    return { type: 'shape-error', error };
+  }
+
+  return { type: 'ok', scenario: validation.scenario };
+};
+
+type ScenarioRetryContext =
+  | { kind: 'model-output-error'; error: ModelOutputInvalidError }
+  | { kind: 'shape-error'; error: InvalidScenarioShapeError };
+
+const scenarioJsonRetryPrompt = (context: ScenarioRetryContext): string => {
+  const problemList =
+    context.kind === 'model-output-error'
+      ? [`- ${context.error.message}`]
+      : context.error.issues.map((issue) => `- ${issue}`);
+
+  const sections: string[] = [
+    'La respuesta anterior no se pudo utilizar porque incumple el DSL REAL.',
+  ];
+
+  if (problemList.length > 0) {
+    sections.push('Problemas detectados:', ...problemList);
+  }
+
+  sections.push(
+    '',
+    'Recuerda las reglas obligatorias:',
+    scenarioDslRules,
+    '',
+    'Genera un nuevo JSON completamente válido respetando el DSL. Devuelve únicamente el JSON sin texto adicional.',
+  );
+
+  return sections.join('\n');
 };
 
 const generateScenarioJson = async (
   draft: ScenarioDraft,
   language: ScenarioLanguage,
-): Promise<Scenario> => {
-  const systemMessage: ChatCompletionMessageParam = {
-    role: 'system',
-    content:
-      'Responde siempre en español. Ajusta la salida al DSL de escenarios definido en este proyecto. No añadas texto fuera del JSON.',
-  };
-
+): Promise<ScenarioJson> => {
   const baseMessages: ChatCompletionMessageParam[] = [
-    systemMessage,
     { role: 'user', content: scenarioJsonPrompt(draft, language) },
   ];
 
@@ -425,19 +498,16 @@ const generateScenarioJson = async (
     return firstEvaluation.scenario;
   }
 
-  const correctionMessage: string =
-    firstEvaluation.type === 'json-error'
-      ? 'La respuesta anterior no es JSON válido. Devuelve únicamente el JSON corregido con el DSL indicado.'
-      : [
-          'La respuesta anterior no cumple el DSL del escenario. Corrige los siguientes problemas sin añadir campos nuevos:',
-          ...formatSchemaIssues(firstEvaluation.issues).map((detail) => `- ${detail}`),
-          'Responde exclusivamente con el JSON corregido.',
-        ].join('\n');
+  const retryPrompt = scenarioJsonRetryPrompt(
+    firstEvaluation.type === 'model-output-error'
+      ? { kind: 'model-output-error', error: firstEvaluation.error }
+      : { kind: 'shape-error', error: firstEvaluation.error },
+  );
 
   const retryMessages: ChatCompletionMessageParam[] = [
     ...baseMessages,
     { role: 'assistant', content: firstResponse },
-    { role: 'user', content: correctionMessage },
+    { role: 'user', content: retryPrompt },
   ];
 
   let secondResponse: string;
@@ -454,11 +524,11 @@ const generateScenarioJson = async (
     return secondEvaluation.scenario;
   }
 
-  if (secondEvaluation.type === 'json-error') {
-    throw new ScenarioJsonValidationError([secondEvaluation.details]);
+  if (secondEvaluation.type === 'model-output-error') {
+    throw secondEvaluation.error;
   }
 
-  throw new ScenarioJsonValidationError(formatSchemaIssues(secondEvaluation.issues));
+  throw secondEvaluation.error;
 };
 
 const callOpenAI = async (prompt: string): Promise<ModelDraftResponse> => {
@@ -466,6 +536,8 @@ const callOpenAI = async (prompt: string): Promise<ModelDraftResponse> => {
     const content = await requestJsonContent({
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
+      systemPrompt:
+        'Eres un asistente que redacta propuestas estructuradas en español y responde únicamente con JSON válido.',
     });
 
     return extractModelResponse(content);
@@ -486,17 +558,26 @@ const callOpenAI = async (prompt: string): Promise<ModelDraftResponse> => {
 
 const handleModelError = (error: unknown, reply: FastifyReply) => {
   if (error instanceof ConfigurationError) {
-    return reply.status(500).send({ message: error.message });
+    return reply.status(500).send({
+      error: 'configuration_error',
+      message: error.message,
+    });
   }
 
   if (error instanceof InvalidModelResponseError) {
-    return reply.status(502).send({ message: error.message });
+    return reply.status(502).send({
+      error: 'model_output_invalid',
+      message: error.message,
+    });
   }
 
   app.log.error({ err: error }, 'Error inesperado al manejar la respuesta del modelo');
   return reply
     .status(502)
-    .send({ message: 'No se pudo generar la propuesta del escenario.' });
+    .send({
+      error: 'model_request_failed',
+      message: 'No se pudo generar la propuesta del escenario.',
+    });
 };
 
 app.post<{ Body: unknown }>('/scenario-drafts', async (request, reply) => {
@@ -505,7 +586,11 @@ app.post<{ Body: unknown }>('/scenario-drafts', async (request, reply) => {
   if (!parsedBody.success) {
     return reply
       .status(400)
-      .send({ message: 'Cuerpo de la solicitud inválido.', issues: parsedBody.error.issues });
+      .send({
+        error: 'invalid_request',
+        message: 'Cuerpo de la solicitud inválido.',
+        issues: parsedBody.error.issues,
+      });
   }
 
   const { description } = parsedBody.data;
@@ -543,7 +628,11 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/refine', 
   if (!parsedBody.success) {
     return reply
       .status(400)
-      .send({ message: 'Cuerpo de la solicitud inválido.', issues: parsedBody.error.issues });
+      .send({
+        error: 'invalid_request',
+        message: 'Cuerpo de la solicitud inválido.',
+        issues: parsedBody.error.issues,
+      });
   }
 
   const draft = drafts.get(id);
@@ -551,7 +640,10 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/refine', 
   if (!draft) {
     return reply
       .status(404)
-      .send({ message: 'No se encontró el borrador del escenario.' });
+      .send({
+        error: 'draft_not_found',
+        message: 'No se encontró el borrador del escenario.',
+      });
   }
 
   const { feedback } = parsedBody.data;
@@ -582,7 +674,11 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
   if (!parsedBody.success) {
     return reply
       .status(400)
-      .send({ message: 'Cuerpo de la solicitud inválido.', issues: parsedBody.error.issues });
+      .send({
+        error: 'invalid_request',
+        message: 'Cuerpo de la solicitud inválido.',
+        issues: parsedBody.error.issues,
+      });
   }
 
   const draft = drafts.get(id);
@@ -590,7 +686,10 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
   if (!draft) {
     return reply
       .status(404)
-      .send({ message: 'No se encontró el borrador del escenario.' });
+      .send({
+        error: 'draft_not_found',
+        message: 'No se encontró el borrador del escenario.',
+      });
   }
 
   const language: ScenarioLanguage = (parsedBody.data?.language ?? 'es') as ScenarioLanguage;
@@ -623,10 +722,21 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
       generatedScenario: scenarioJson,
     });
   } catch (error) {
-    if (error instanceof ScenarioJsonValidationError) {
-      return reply
-        .status(400)
-        .send({ error: 'invalid_scenario_json', details: error.details });
+    if (error instanceof InvalidScenarioShapeError) {
+      return reply.status(400).send({
+        error: 'invalid_scenario_shape',
+        message: error.message,
+        ...(error.issues.length > 0 ? { issues: error.issues } : {}),
+        ...(error.missingFields ? { missingFields: error.missingFields } : {}),
+        ...(error.invalidKeys ? { invalidKeys: error.invalidKeys } : {}),
+      });
+    }
+
+    if (error instanceof ModelOutputInvalidError) {
+      return reply.status(502).send({
+        error: 'model_output_invalid',
+        message: error.message,
+      });
     }
 
     if (error instanceof OpenAIRequestFailedError) {
@@ -687,7 +797,10 @@ app.get<{ Params: DraftParams }>('/scenario-drafts/:id', async (request, reply) 
   if (!draft) {
     return reply
       .status(404)
-      .send({ message: 'No se encontró el borrador del escenario.' });
+      .send({
+        error: 'draft_not_found',
+        message: 'No se encontró el borrador del escenario.',
+      });
   }
 
   return reply.send(draft);
@@ -700,13 +813,19 @@ app.get<{ Params: DraftParams }>('/scenario-drafts/:id/json', async (request, re
   if (!draft) {
     return reply
       .status(404)
-      .send({ message: 'No se encontró el borrador del escenario.' });
+      .send({
+        error: 'draft_not_found',
+        message: 'No se encontró el borrador del escenario.',
+      });
   }
 
   if (!draft.generatedScenario) {
     return reply
       .status(404)
-      .send({ message: 'No se encontró JSON generado para este borrador.' });
+      .send({
+        error: 'scenario_json_not_found',
+        message: 'No se encontró JSON generado para este borrador.',
+      });
   }
 
   return reply.send(draft.generatedScenario.content);

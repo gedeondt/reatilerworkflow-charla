@@ -1,5 +1,7 @@
 import OpenAI from 'openai';
 
+import { scenarioSystemPrompt } from './scenarioContract.js';
+
 export type ChatCompletionMessageParam =
   OpenAI.Chat.Completions.ChatCompletionMessageParam;
 export type ChatCompletionResponseFormat =
@@ -7,8 +9,7 @@ export type ChatCompletionResponseFormat =
 
 export const OPENAI_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o';
 
-const SYSTEM_MESSAGE =
-  'Responde siempre en español. Ajusta la salida al DSL de escenarios definido en este proyecto. No añadas texto fuera del JSON.';
+const SYSTEM_MESSAGE = scenarioSystemPrompt;
 
 export class ConfigurationError extends Error {}
 export class OpenAIRequestFailedError extends Error {}
@@ -40,6 +41,7 @@ export type RequestJsonContentOptions = {
   temperature?: number;
   responseFormat?: ChatCompletionResponseFormat;
   model?: string;
+  systemPrompt?: string;
 };
 
 export const requestJsonContent = async ({
@@ -47,15 +49,17 @@ export const requestJsonContent = async ({
   temperature = 0.2,
   responseFormat = { type: 'json_object' },
   model = OPENAI_MODEL,
+  systemPrompt,
 }: RequestJsonContentOptions): Promise<string> => {
   const client = ensureOpenAI();
+  const systemMessage = systemPrompt ?? SYSTEM_MESSAGE;
 
   try {
     const completion = await client.chat.completions.create({
       model,
       temperature,
       response_format: responseFormat,
-      messages: [{ role: 'system', content: SYSTEM_MESSAGE }, ...messages],
+      messages: [{ role: 'system', content: systemMessage }, ...messages],
     });
 
     const content = completion.choices[0]?.message?.content;
