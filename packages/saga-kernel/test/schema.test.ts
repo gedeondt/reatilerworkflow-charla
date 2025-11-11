@@ -320,4 +320,13 @@ describe('normalizeScenario', () => {
   it('throws when the scenario is invalid', () => {
     expect(() => normalizeScenario({})).toThrow(z.ZodError);
   });
+
+  it('throws when the scenario declares top-level events or listeners', () => {
+    const invalidScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Record<string, unknown>;
+
+    invalidScenario.events = [];
+    invalidScenario.listeners = [];
+
+    expect(() => normalizeScenario(invalidScenario)).toThrow(z.ZodError);
+  });
 });

@@ -56,4 +56,43 @@ describe('scenario loader', () => {
 
     rmSync(tempDir, { recursive: true, force: true });
   });
+
+  it('rejects scenarios that declare top-level events or listeners', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'saga-kernel-loader-legacy-'));
+    const businessDir = join(tempDir, 'business');
+    const scenarioPath = join(businessDir, 'invalid-top-level.json');
+
+    mkdirSync(businessDir, { recursive: true });
+
+    const invalidScenario = {
+      name: 'Legacy scenario',
+      version: 1,
+      events: [],
+      listeners: [],
+      domains: [
+        {
+          id: 'order',
+          queue: 'order-queue',
+          events: [
+            {
+              name: 'OrderPlaced',
+              payloadSchema: {
+                orderId: 'string',
+              },
+            },
+          ],
+        },
+      ],
+    } satisfies Record<string, unknown>;
+
+    writeFileSync(scenarioPath, JSON.stringify(invalidScenario));
+
+    vi.spyOn(process, 'cwd').mockReturnValue(tempDir);
+
+    expect(() => loadScenario('invalid-top-level')).toThrow(
+      new RegExp(`^Scenario validation failed for "${escapeForRegExp(scenarioPath)}":`)
+    );
+
+    rmSync(tempDir, { recursive: true, force: true });
+  });
 });
