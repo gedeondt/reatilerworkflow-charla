@@ -16,70 +16,72 @@ export type ScenarioDraftSummary = {
 };
 
 export const scenarioDslRules = `
-El escenario debe seguir al pie de la letra el contrato de @reatiler/saga-kernel.scenarioSchema.
+Contrato obligatorio de @reatiler/saga-kernel.scenarioSchema (todos los escenarios deben cumplirlo exactamente):
 
-La forma general es:
+Raíz del JSON:
 {
   "name": string,
   "version": number,
-  "domains": [
-    { "id": string, "queue": string }
-  ],
-  "events": [
-    {
-      "name": string,
-      "payloadSchema": {
-        "<campo>":
-          | "string" | "number" | "boolean"
-          | "string[]" | "number[]" | "boolean[]"
-          | { "<subcampo>": ... } // objeto plano con tipos primitivos
-          | [ { "<subcampo>": ... } ] // array de objetos planos
-      }
-    }
-  ],
-  "listeners": [
-    {
-      "id": string,
-      "on": { "event": string },
-      "delayMs"?: number,
-      "actions": [
-        { "type": "set-state", "domain": string, "status": string }
-        |
-        {
-          "type": "emit",
-          "event": string,
-          "toDomain": string,
-          "mapping": {
-            "<campo>":
-              | string // referencia directa a un campo del payload recibido
-              | { "const": string | number | boolean | null } // constante escalar permitida por el schema destino
-              | { "<subcampo>": string | { "const": string | number | boolean | null } } // para objetos anidados definidos en el payloadSchema destino
-              | { "from": string, "item": { ... } } // solo si el campo destino es un array según su payloadSchema
-          }
-        }
-      ]
-    }
-  ]
+  "domains": Domain[],
+  "events": Event[],
+  "listeners": Listener[]
 }
 
-Reglas estrictas:
-- Mantén EXACTAMENTE estas claves y tipos.
-- "payloadSchema" define los campos permitidos del payload del evento. Sólo acepta tipos primitivos, objetos planos o arrays de objetos planos según el schema real.
-- Para cada acción "emit":
-  - Debes mirar el "payloadSchema" del evento DESTINO antes de construir el "mapping".
-  - Para cada campo del "payloadSchema" destino:
-    - Si es un valor escalar (string, number, boolean, etc.):
-      - el "mapping" para ese campo debe ser SIEMPRE una referencia a un campo del evento de entrada ("campoDestino": "campoOrigen") o una constante escalar ("campoDestino": { "const": "VALOR" }).
-      - NO uses objetos ni estructuras de array para ese campo.
-    - Si el "payloadSchema" destino define un array:
-      - solo entonces puedes usar una estructura de mapeo de array: "campoArrayDestino": { "from": "campoArrayOrigen", "item": { ... } }.
-      - dentro de "item", usa únicamente referencias a campos del elemento origen o { "const": ... }.
-    - Si el campo destino es un objeto anidado permitido por el schema:
-      - construye un objeto con mappings escalares dentro, sin añadir niveles adicionales arbitrarios.
-- Regla dura: el TIPO del valor producido por "mapping" debe coincidir con el tipo definido en el "payloadSchema" del evento destino. Si el campo destino es escalar, el mapping debe ser escalar. Si es array, el mapping debe ser de array según el patrón permitido.
-- No inventes estructuras de mapeo complejas si el payloadSchema del evento destino no las define.
-- No añadas claves no reconocidas por scenarioSchema (por ejemplo: fields, steps, lanes, actors, subscribesTo, sagaSummary, openQuestions, metadata, mode, item, etc.).
-- Si la descripción no corresponde a un negocio real, inventa una SAGA creativa pero válida siguiendo este mismo DSL.
+Domain:
+{ "id": string, "queue": string }
+
+Event:
+{
+  "name": string,
+  "payloadSchema": PayloadSchema
+}
+
+PayloadSchema permitido:
+- Objeto plano. Cada propiedad se define como uno de estos valores literales:
+  * "string" | "number" | "boolean"
+  * "string[]" | "number[]" | "boolean[]"
+  * Un array con un ÚNICO objeto plano que describe la forma de los ítems. Ejemplo:
+    "items": [ { "sku": "string", "cantidad": "number" } ]
+- No se permiten objetos anidados arbitrarios fuera de los arrays descritos.
+- No se permiten arrays de arrays ni claves especiales como fields/payload.
+
+Listener:
+{
+  "id": string,
+  "on": { "event": string },
+  "delayMs"?: number,
+  "actions": Action[]
+}
+
+Acciones válidas:
+- set-state → { "type": "set-state", "domain": string, "status": string }
+- emit → { "type": "emit", "event": string, "toDomain": string, "mapping": Mapping }
+
+Reglas críticas para Mapping:
+- Construye el mapping consultando el payloadSchema del EVENTO DESTINO.
+- Para cada campo del schema destino:
+  * Si es primitivo ("string", "number", "boolean" o versiones []):
+    - Usa "campoDestino": "campoOrigen" (referencia directa) o
+      "campoDestino": { "from": "campoOrigen" } o
+      "campoDestino": { "const": valor compatible }.
+    - No utilices objetos adicionales ni arrayFrom.
+  * Si es un ARRAY de OBJETOS (ej.: [ { ... } ]):
+    - Usa la forma exacta:
+      "campoArrayDestino": {
+        "arrayFrom": "campoArrayOrigen",
+        "map": {
+          "subCampoDestino": "subCampoOrigen" | { "const": valorCompatible }
+        }
+      }
+    - arrayFrom debe apuntar a un campo array existente en el evento origen.
+    - map solo puede usar subcampos del ítem origen o constantes tipadas correctamente.
+- No declares campos en mapping que no existan en el payloadSchema destino.
+- No referencies campos inexistentes en el evento origen.
+- Si no existe un origen válido, usa { "const": ... } del tipo adecuado.
+
+Prohibido:
+- Cualquier clave extra (fields, steps, lanes, subscribesTo, sagaSummary, openQuestions, metadata, etc.).
+- Estructuras de mapping diferentes a las descritas.
 `.trim();
 
 export const scenarioJsonPrompt = (
@@ -92,18 +94,20 @@ export const scenarioJsonPrompt = (
 
 ${scenarioDslRules}
 
-Cuando definas "mapping" en una acción "emit":
-- Revisa primero el "payloadSchema" del evento destino.
-- Asegúrate de que cada entrada en "mapping" produce un valor del tipo correcto para ese campo destino.
-- Si el esquema del campo destino es escalar, usa solo "campoDestino": "campoOrigen" o "campoDestino": { "const": ... }.
-- Solo uses la forma con "from" + "item" cuando el campo destino es un array en el payloadSchema.
+Reglas clave al escribir "mapping" dentro de una acción "emit":
+- Revisa primero el payloadSchema del evento destino.
+- Para campos escalares, usa únicamente "campoDestino": "campoOrigen", "campoDestino": { "from": "campoOrigen" } o "campoDestino": { "const": valorCompatible }.
+- Para arrays de objetos usa SOLO la forma: "campoArrayDestino": { "arrayFrom": "campoArrayOrigen", "map": { ... } }.
+- No inventes otras estructuras ni incluyas campos no definidos en el payloadSchema destino.
+- No referencies campos inexistentes del evento origen; emplea { "const": ... } si es necesario.
 
 Instrucciones clave:
 - Lee la descripción inicial y la propuesta aprobada para comprender el proceso.
 - Si se trata de un proceso de negocio coherente, define dominios, eventos y listeners siguiendo el DSL oficial.
 - Si el texto es absurdo o incoherente, inventa una SAGA creativa pero válida usando el mismo DSL.
 - Devuelve SOLO un JSON que cumpla ese esquema, sin comentarios ni texto adicional.
-- No uses claves prohibidas ni estructuras fuera del contrato.
+- No añadas claves prohibidas ni estructuras fuera del contrato.
+- Asegúrate de que "payloadSchema" no utiliza campos especiales (fields, payload, etc.) y solo contiene las definiciones permitidas.
 
 Descripción inicial del escenario:
 """
@@ -144,8 +148,8 @@ ${errorsList}
 Recuerda:
 - Revisa la descripción inicial y la propuesta refinada.
 - Ajusta el JSON para corregir los errores sin introducir claves nuevas.
-- Cuando definas "mapping" en una acción "emit", revisa primero el "payloadSchema" del evento destino, respeta el tipo de cada campo y aplica las reglas de mapeo descritas.
-- Devuelve SOLO el JSON corregido. No añadas comentarios ni texto fuera del JSON.
+- Al construir "mapping" en una acción "emit", respeta las reglas descritas: escalares con "campoDestino": "campoOrigen" | { "from": ... } | { "const": ... } y arrays de objetos con { "arrayFrom": ..., "map": { ... } }.
+- Devuelve SOLO el JSON corregido que cumpla exactamente el DSL; no añadas texto adicional.
 
 Descripción inicial:
 """
