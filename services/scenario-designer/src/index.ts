@@ -483,12 +483,29 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
     const result = await generateScenarioJson(draft, language);
 
     if (!result.ok) {
-      request.log.warn({ draftId: id, errors: result.failure.errors }, 'generated scenario invalid');
+      request.log.warn(
+        {
+          draftId: id,
+          errors: result.failure.errors,
+          rawScenario: result.response?.slice(0, 4000),
+        },
+        'generated scenario invalid',
+      );
+
+      let candidateScenario: unknown = undefined;
+      try {
+        candidateScenario = JSON.parse(result.response);
+      } catch {
+        // ignore JSON parse errors
+      }
+
       return reply.status(422).send({
         error: 'invalid_scenario_shape',
         message:
-          'El escenario generado no cumple el contrato esperado. Revisa la descripción o refina el escenario.',
+          'El escenario generado no cumple el contrato esperado. Revisa detalles y el candidato devuelto.',
         details: result.failure.errors,
+        candidateScenario,
+        rawResponse: candidateScenario ? undefined : result.response,
       });
     }
 
