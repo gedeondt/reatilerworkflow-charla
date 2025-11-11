@@ -325,6 +325,54 @@ describe('POST /scenario/apply', () => {
     expect(mockedAxios.get).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects drafts whose generated scenario uses top-level definitions', async () => {
+    mockedAxios.get
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          id: 'legacy-draft',
+          status: 'ready',
+          currentProposal: { name: 'legacy-saga' },
+          hasGeneratedScenario: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        data: {
+          name: 'legacy-saga',
+          version: 1,
+          events: [],
+          listeners: [],
+          domains: [
+            {
+              id: 'ventas',
+              queue: 'ventas',
+              events: [
+                { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } },
+              ],
+            },
+          ],
+        },
+      });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/scenario/apply',
+      payload: { type: 'draft', draftId: 'legacy-draft' },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({
+      error: 'invalid_scenario_definition',
+      message: 'Generated scenario JSON is invalid.',
+    });
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+    expect(__testing.getActiveScenario()).toEqual({
+      name: 'retailer-happy-path',
+      source: 'business',
+    });
+  });
+
   it('applies a ready draft and registers the dynamic scenario', async () => {
     mockedAxios.get
       .mockResolvedValueOnce({
