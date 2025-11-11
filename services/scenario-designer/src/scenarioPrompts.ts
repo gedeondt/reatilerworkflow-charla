@@ -58,26 +58,32 @@ Acciones válidas:
 - emit → { "type": "emit", "event": string, "toDomain": string, "mapping": Mapping }
 
 Reglas críticas para Mapping:
-- Construye el mapping consultando el payloadSchema del EVENTO DESTINO.
-- Para cada campo del schema destino:
-  * Si es primitivo ("string", "number", "boolean" o versiones []):
-    - Usa "campoDestino": "campoOrigen" (referencia directa) o
-      "campoDestino": { "from": "campoOrigen" } o
-      "campoDestino": { "const": valor compatible }.
-    - No utilices objetos adicionales ni arrayFrom.
-  * Si es un ARRAY de OBJETOS (ej.: [ { ... } ]):
-    - Usa la forma exacta:
-      "campoArrayDestino": {
-        "arrayFrom": "campoArrayOrigen",
-        "map": {
-          "subCampoDestino": "subCampoOrigen" | { "const": valorCompatible }
-        }
-      }
-    - arrayFrom debe apuntar a un campo array existente en el evento origen.
-    - map solo puede usar subcampos del ítem origen o constantes tipadas correctamente.
+- Cuando definas mapping para un evento destino:
+  - Revisa el payloadSchema del evento destino.
+  - Para cada campo del destino:
+    - Si el tipo es "string", "number" o "boolean":
+      - Usa SOLO:
+        - "campoDestino": "campoOrigen"
+        - o "campoDestino": { "from": "campoOrigen" }
+        - o "campoDestino": { "const": valor escalar compatible }.
+      - No uses arrayFrom, map ni objetos complejos.
+    - Si el tipo es "string[]", "number[]" o "boolean[]":
+      - Trátalo también como un valor escalar-colección.
+      - Usa SOLO:
+        - "campoDestino": "campoOrigen" si el origen es también un array del mismo tipo,
+        - o "campoDestino": { "from": "campoOrigen" },
+        - o "campoDestino": { "const": [ valores del tipo correcto ] }.
+      - Está PROHIBIDO usar arrayFrom + map para estos campos.
+    - Solo si el payloadSchema destino define un ARRAY DE OBJETOS (ej.: "items": [ { "sku": "string" } ]):
+      - puedes usar:
+        - "campoArrayDestino": { "arrayFrom": "campoArrayOrigen", "map": { "subCampoDestino": "subCampoOrigen" | { "const": ... } } }
+      - arrayFrom debe apuntar a un campo array de objetos en el evento origen.
+      - Dentro de map solo referencias a campos del ítem origen o constantes tipadas correctamente.
+  - Regla dura:
+    - El tipo construido por mapping debe coincidir EXACTAMENTE con el tipo del payloadSchema destino.
+    - Si no tienes un origen razonable, usa { "const": ... } con el tipo correcto.
+    - No referencies campos que no existan en el evento de entrada.
 - No declares campos en mapping que no existan en el payloadSchema destino.
-- No referencies campos inexistentes en el evento origen.
-- Si no existe un origen válido, usa { "const": ... } del tipo adecuado.
 
 Prohibido:
 - Cualquier clave extra (fields, steps, lanes, subscribesTo, sagaSummary, openQuestions, metadata, etc.).
@@ -94,12 +100,12 @@ export const scenarioJsonPrompt = (
 
 ${scenarioDslRules}
 
-Reglas clave al escribir "mapping" dentro de una acción "emit":
-- Revisa primero el payloadSchema del evento destino.
-- Para campos escalares, usa únicamente "campoDestino": "campoOrigen", "campoDestino": { "from": "campoOrigen" } o "campoDestino": { "const": valorCompatible }.
-- Para arrays de objetos usa SOLO la forma: "campoArrayDestino": { "arrayFrom": "campoArrayOrigen", "map": { ... } }.
-- No inventes otras estructuras ni incluyas campos no definidos en el payloadSchema destino.
-- No referencies campos inexistentes del evento origen; emplea { "const": ... } si es necesario.
+  Recordatorio obligatorio sobre mappings:
+  - Cuando generes 'mapping' en acciones 'emit', asegúrate de seguir estrictamente las reglas anteriores:
+    - Para campos 'string[]'/'number[]'/'boolean[]' SOLO mapeos escalares o const (sin arrayFrom/map).
+    - Usa 'arrayFrom' + 'map' ÚNICAMENTE para arrays de objetos definidos como [ { ... } ] en el payloadSchema destino.
+  - No inventes otras estructuras ni incluyas campos no definidos en el payloadSchema destino.
+  - No referencies campos inexistentes del evento origen; emplea { 'const': ... } si es necesario.
 
 Instrucciones clave:
 - Lee la descripción inicial y la propuesta aprobada para comprender el proceso.
@@ -142,14 +148,16 @@ export const scenarioJsonRetryPrompt = ({
 
 ${scenarioDslRules}
 
-Errores detectados:
-${errorsList}
+  Errores detectados:
+  ${errorsList}
 
-Recuerda:
-- Revisa la descripción inicial y la propuesta refinada.
-- Ajusta el JSON para corregir los errores sin introducir claves nuevas.
-- Al construir "mapping" en una acción "emit", respeta las reglas descritas: escalares con "campoDestino": "campoOrigen" | { "from": ... } | { "const": ... } y arrays de objetos con { "arrayFrom": ..., "map": { ... } }.
-- Devuelve SOLO el JSON corregido que cumpla exactamente el DSL; no añadas texto adicional.
+  Corrige los mappings para que los campos con tipo 'string[]'/'number[]'/'boolean[]' usen solo referencias directas o 'const', sin 'arrayFrom' ni 'map' de objetos.
+
+  Recuerda:
+  - Revisa la descripción inicial y la propuesta refinada.
+  - Ajusta el JSON para corregir los errores sin introducir claves nuevas.
+  - Al construir "mapping" en una acción "emit", respeta las reglas descritas: escalares con referencias directas o { "const": ... }, arrays de primitivos solo con referencias o { "const": [...] } y arrays de objetos con { "arrayFrom": ..., "map": { ... } }.
+  - Devuelve SOLO el JSON corregido que cumpla exactamente el DSL; no añadas texto adicional.
 
 Descripción inicial:
 """
