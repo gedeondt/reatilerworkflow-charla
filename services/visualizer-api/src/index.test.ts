@@ -341,19 +341,24 @@ describe('POST /scenario/apply', () => {
         data: {
           name: 'dynamic-saga',
           version: 1,
-          domains: [{ id: 'ventas', queue: 'ventas' }],
-          events: [
-            { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
-          ],
-          listeners: [
+          domains: [
             {
-              id: 'ventas-on-PedidoCreado',
-              on: { event: 'PedidoCreado' },
-              actions: [
-                { type: 'set-state', domain: 'ventas', status: 'RECIBIDO' },
+              id: 'ventas',
+              queue: 'ventas',
+              events: [
+                { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
               ],
-            },
-          ],
+              listeners: [
+                {
+                  id: 'ventas-on-PedidoCreado',
+                  on: { event: 'PedidoCreado' },
+                  actions: [
+                    { type: 'set-state', status: 'RECIBIDO' }
+                  ]
+                }
+              ]
+            }
+          ]
         },
       })
       .mockResolvedValueOnce({
@@ -364,23 +369,27 @@ describe('POST /scenario/apply', () => {
             content: {
               name: 'dynamic-saga',
               version: 1,
-              domains: [{ id: 'ventas', queue: 'ventas' }],
-              events: [
-                { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
-              ],
-              listeners: [
+              domains: [
                 {
-                  id: 'ventas-on-PedidoCreado',
-                  on: { event: 'PedidoCreado' },
-                  actions: [
-                    {
-                      type: 'set-state',
-                      domain: 'ventas',
-                      status: 'RECIBIDO',
-                    },
+                  id: 'ventas',
+                  queue: 'ventas',
+                  events: [
+                    { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
                   ],
-                },
-              ],
+                  listeners: [
+                    {
+                      id: 'ventas-on-PedidoCreado',
+                      on: { event: 'PedidoCreado' },
+                      actions: [
+                        {
+                          type: 'set-state',
+                          status: 'RECIBIDO'
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
             },
             createdAt: '2024-01-01T00:00:00.000Z',
             bootstrapExample: {
@@ -450,26 +459,31 @@ describe('GET /scenario-definition', () => {
     const definition: Scenario = {
       name: 'from-draft',
       version: 1,
-      domains: [{ id: 'order', queue: 'orders' }],
-      events: [
-        { name: 'OrderPlaced', payloadSchema: { orderId: 'string' } }
-      ],
-      listeners: [
+      domains: [
         {
-          id: 'order-on-OrderPlaced',
-          on: { event: 'OrderPlaced' },
-          actions: [
-            {
-              type: 'emit',
-              event: 'OrderPlaced',
-              toDomain: 'order',
-              mapping: {
-                orderId: 'orderId'
-              }
-            },
+          id: 'order',
+          queue: 'orders',
+          events: [
+            { name: 'OrderPlaced', payloadSchema: { orderId: 'string' } }
           ],
-        },
-      ],
+          listeners: [
+            {
+              id: 'order-on-OrderPlaced',
+              on: { event: 'OrderPlaced' },
+              actions: [
+                {
+                  type: 'emit',
+                  event: 'OrderPlaced',
+                  toDomain: 'order',
+                  mapping: {
+                    orderId: 'orderId'
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
     } as const;
 
     __testing.registerDynamicScenario({
@@ -503,26 +517,31 @@ describe('GET /scenario-bootstrap', () => {
     const definition: Scenario = {
       name: 'dynamic-saga',
       version: 1,
-      domains: [{ id: 'ventas', queue: 'ventas' }],
-      events: [
-        { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
-      ],
-      listeners: [
+      domains: [
         {
-          id: 'ventas-on-PedidoCreado',
-          on: { event: 'PedidoCreado' },
-          actions: [
-            {
-              type: 'emit',
-              event: 'PedidoCreado',
-              toDomain: 'ventas',
-              mapping: {
-                pedidoId: 'pedidoId'
-              }
-            },
+          id: 'ventas',
+          queue: 'ventas',
+          events: [
+            { name: 'PedidoCreado', payloadSchema: { pedidoId: 'string' } }
           ],
-        },
-      ],
+          listeners: [
+            {
+              id: 'ventas-on-PedidoCreado',
+              on: { event: 'PedidoCreado' },
+              actions: [
+                {
+                  type: 'emit',
+                  event: 'PedidoCreado',
+                  toDomain: 'ventas',
+                  mapping: {
+                    pedidoId: 'pedidoId'
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
     } as const;
 
     __testing.registerDynamicScenario({
