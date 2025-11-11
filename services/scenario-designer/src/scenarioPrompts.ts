@@ -22,13 +22,21 @@ Raíz del JSON:
 {
   "name": string,
   "version": number,
-  "domains": Domain[],
-  "events": Event[],
-  "listeners": Listener[]
+  "domains": DomainSpec[],
+  "events"?: Event[],
+  "listeners"?: Listener[]
 }
 
-Domain:
-{ "id": string, "queue": string }
+DomainSpec (forma recomendada):
+{
+  "id": string,
+  "queue": string,
+  "events"?: Event[],
+  "listeners"?: Listener[]
+}
+
+- Para escenarios nuevos, declara todos los eventos y listeners dentro del dominio correspondiente usando las claves "events" y "listeners" anidadas.
+- Las listas top-level "events" y "listeners" existen solo para compatibilidad con escenarios antiguos; no las utilices al generar nuevos escenarios.
 
 Event:
 {
@@ -56,6 +64,9 @@ Listener:
 Acciones válidas:
 - set-state → { "type": "set-state", "domain": string, "status": string }
 - emit → { "type": "emit", "event": string, "toDomain": string, "mapping": Mapping }
+
+- Los nombres de eventos son globales y únicos. Cualquier listener puede reaccionar al evento declarado en "on.event" sin importar el dominio que lo definió.
+- Los listeners pueden vivir en cualquier dominio; asegúrate de que su "id" sea único en todo el escenario.
 
 Reglas críticas para Mapping:
 - Cuando definas mapping para un evento destino:
@@ -99,6 +110,11 @@ export const scenarioJsonPrompt = (
   return `Analiza la descripción y la propuesta refinada para generar un escenario SAGA ejecutable en formato JSON.
 
 ${scenarioDslRules}
+
+Recuerda:
+- Define los eventos y listeners dentro de cada dominio usando "domains[*].events" y "domains[*].listeners".
+- No declares las listas top-level "events" ni "listeners" en el escenario generado.
+- Mantén los nombres de los eventos únicos y reutilízalos cuando otros dominios deban reaccionar.
 
 Cuando generes mappings:
 - Para campos 'string[]', 'number[]' o 'boolean[]' del evento destino, SOLO puedes usar un campo array existente del evento de entrada ("campoDestino": "campoOrigen" o { 'from': 'campoOrigen' }).
@@ -148,6 +164,10 @@ export const scenarioJsonRetryPrompt = ({
   return `La respuesta anterior no cumple el contrato del escenario. Corrige el JSON anterior siguiendo exactamente las reglas del DSL y estas correcciones:
 
 ${scenarioDslRules}
+
+  Reglas adicionales:
+  - Declara "events" y "listeners" dentro del dominio correspondiente; no utilices listas top-level.
+  - Mantén los nombres de eventos únicos en todo el escenario.
 
   Errores detectados:
   ${errorsList}
