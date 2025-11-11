@@ -1,5 +1,5 @@
 import { normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
-import { z } from '@reatiler/shared/z';
+import { z } from 'zod';
 
 export type ScenarioContract = Scenario;
 

@@ -523,7 +523,37 @@ app.get('/health', async () => ({ ok: true }));
 
 app.get('/scenario', async (_request, reply) => {
   const { name, source } = getActiveScenario();
-  return reply.send({ name, source });
+
+  try {
+    let definition: Scenario;
+
+    if (source === 'draft') {
+      const record = dynamicScenarios.get(name);
+
+      if (!record) {
+        throw new HttpError(500, {
+          error: 'active_draft_not_found',
+          message: `Active draft scenario "${name}" is not registered.`,
+        });
+      }
+
+      definition = record.definition;
+    } else {
+      definition = await loadBusinessScenarioDefinition(name);
+    }
+
+    return reply.send({ name, source, definition });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return reply.status(error.status).send(error.payload);
+    }
+
+    app.log.error({ err: error }, 'failed to load active scenario definition');
+    return reply.status(500).send({
+      error: 'unexpected_error',
+      message: 'Failed to load active scenario.',
+    });
+  }
 });
 
 app.get('/scenario-bootstrap', async (_request, reply) => {

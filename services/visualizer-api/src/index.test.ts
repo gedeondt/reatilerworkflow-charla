@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { type Scenario } from '@reatiler/saga-kernel';
+import { loadScenario, type Scenario } from '@reatiler/saga-kernel';
 import { app, applyEventToState, type TraceView, __testing } from './index.js';
 
 vi.mock('axios', () => {
@@ -31,6 +31,54 @@ beforeEach(() => {
   __testing.resetLogBuffer();
   __testing.clearDynamicScenarios();
   __testing.setActiveScenarioName('retailer-happy-path');
+});
+
+describe('GET /scenario', () => {
+  it('returns the normalized active business scenario', async () => {
+    const expected = loadScenario('retailer-happy-path');
+
+    const response = await app.inject({ method: 'GET', url: '/scenario' });
+
+    expect(response.statusCode).toBe(200);
+
+    const payload = response.json() as {
+      name: string;
+      source: string;
+      definition: Scenario;
+    };
+
+    expect(payload).toMatchObject({
+      name: 'retailer-happy-path',
+      source: 'business',
+    });
+    expect(payload.definition).toEqual(expected);
+  });
+
+  it('returns the normalized active draft scenario', async () => {
+    const scenario = loadScenario('retailer-happy-path');
+    const now = new Date().toISOString();
+
+    __testing.registerDynamicScenario({
+      name: 'draft-scenario',
+      definition: scenario,
+      origin: { type: 'draft', draftId: 'draft-1' },
+      appliedAt: now,
+    });
+    __testing.setActiveScenarioName('draft-scenario', 'draft');
+
+    const response = await app.inject({ method: 'GET', url: '/scenario' });
+
+    expect(response.statusCode).toBe(200);
+
+    const payload = response.json() as {
+      name: string;
+      source: string;
+      definition: Scenario;
+    };
+
+    expect(payload).toMatchObject({ name: 'draft-scenario', source: 'draft' });
+    expect(payload.definition).toEqual(scenario);
+  });
 });
 
 describe('applyEventToState', () => {
