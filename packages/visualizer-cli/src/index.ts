@@ -653,33 +653,50 @@ function createScenarioContext(scenario: Scenario, domains: Domain[]): ScenarioC
 
   const eventStateUpdates: Record<string, DomainStatusUpdate[]> = {};
 
-  for (const listener of scenario.listeners) {
-    for (const action of listener.actions) {
-      if (action.type !== 'set-state') {
-        continue;
-      }
+  const eventOwners = new Map<string, string>();
 
-      const updates = eventStateUpdates[listener.on.event] ?? [];
-      updates.push({ domainId: action.domain, status: action.status });
-      eventStateUpdates[listener.on.event] = updates;
+  for (const domain of scenario.domains) {
+    for (const event of domain.events ?? []) {
+      eventOwners.set(event.name, domain.id);
+    }
+  }
+
+  for (const domain of scenario.domains) {
+    for (const listener of domain.listeners ?? []) {
+      for (const action of listener.actions) {
+        if (action.type !== 'set-state') {
+          continue;
+        }
+
+        const updates = eventStateUpdates[listener.on.event] ?? [];
+        updates.push({ domainId: domain.id, status: action.status });
+        eventStateUpdates[listener.on.event] = updates;
+      }
     }
   }
 
   const eventFlowTargets: Record<string, string[]> = {};
 
-  for (const listener of scenario.listeners) {
-    for (const action of listener.actions) {
-      if (action.type !== 'emit') {
-        continue;
-      }
+  for (const domain of scenario.domains) {
+    for (const listener of domain.listeners ?? []) {
+      for (const action of listener.actions) {
+        if (action.type !== 'emit') {
+          continue;
+        }
 
-      const entries = eventFlowTargets[listener.on.event] ?? [];
-      entries.push(action.toDomain);
-      eventFlowTargets[listener.on.event] = entries;
+        const entries = eventFlowTargets[listener.on.event] ?? [];
+        const targetDomain = action.toDomain ?? eventOwners.get(action.event);
+
+        if (targetDomain) {
+          entries.push(targetDomain);
+        }
+
+        eventFlowTargets[listener.on.event] = entries;
+      }
     }
   }
 
-  const eventNames = new Set<string>(scenario.events.map((event) => event.name));
+  const eventNames = new Set<string>(eventOwners.keys());
 
   return { scenario, domains, queueToDomainId, eventStateUpdates, eventFlowTargets, eventNames };
 }

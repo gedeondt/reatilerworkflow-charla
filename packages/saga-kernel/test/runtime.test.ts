@@ -22,31 +22,40 @@ describe('scenario runtime', () => {
       name: 'Mini scenario',
       version: 1,
       domains: [
-        { id: 'source', queue: 'queue-source' },
-        { id: 'target', queue: 'queue-target' }
-      ],
-      events: [
-        { name: 'Initial', payloadSchema: { orderId: 'string', amount: 'number' } },
-        { name: 'FollowUp', payloadSchema: { orderId: 'string', amount: 'number', status: 'string' } }
-      ],
-      listeners: [
         {
-          id: 'on-initial',
-          on: { event: 'Initial' },
-          delayMs: 50,
-          actions: [
-            { type: 'set-state', domain: 'source', status: 'PROCESSED' },
+          id: 'source',
+          queue: 'queue-source',
+          events: [
+            { name: 'Initial', payloadSchema: { orderId: 'string', amount: 'number' } }
+          ],
+          listeners: [
             {
-              type: 'emit',
-              event: 'FollowUp',
-              toDomain: 'target',
-              mapping: {
-                orderId: 'orderId',
-                amount: 'amount',
-                status: { const: 'PROCESSED' }
-              }
+              id: 'on-initial',
+              on: { event: 'Initial' },
+              delayMs: 50,
+              actions: [
+                { type: 'set-state', status: 'PROCESSED' },
+                {
+                  type: 'emit',
+                  event: 'FollowUp',
+                  toDomain: 'target',
+                  mapping: {
+                    orderId: 'orderId',
+                    amount: 'amount',
+                    status: { const: 'PROCESSED' }
+                  }
+                }
+              ]
             }
           ]
+        },
+        {
+          id: 'target',
+          queue: 'queue-target',
+          events: [
+            { name: 'FollowUp', payloadSchema: { orderId: 'string', amount: 'number', status: 'string' } }
+          ],
+          listeners: []
         }
       ]
     };

@@ -87,7 +87,14 @@ const registerAnonymousParticipant = (
  * Prioriza propiedades explícitas y cae hacia patrones comunes del DSL
  * cuando faltan datos directos.
  */
-const inferSourceDomain = (listener: Record<string, unknown>): string | null => {
+const inferSourceDomain = (
+  listener: Record<string, unknown>,
+  domainIdHint?: string | null,
+): string | null => {
+  if (typeof domainIdHint === "string" && domainIdHint.trim().length > 0) {
+    return domainIdHint.trim();
+  }
+
   if (typeof listener.domain === "string" && listener.domain.trim().length > 0) {
     return listener.domain.trim();
   }
@@ -100,16 +107,6 @@ const inferSourceDomain = (listener: Record<string, unknown>): string | null => 
     const match = listener.id.match(/^([^\s]+?)-on-/i);
     if (match && match[1]) {
       return match[1];
-    }
-  }
-
-  const actions = Array.isArray(listener.actions)
-    ? listener.actions.filter(isRecord)
-    : [];
-
-  for (const action of actions) {
-    if (typeof action.domain === "string" && action.domain.trim().length > 0) {
-      return action.domain.trim();
     }
   }
 
@@ -153,62 +150,94 @@ const extractInteractions = (
   scenario: Record<string, unknown>,
   registry: ParticipantRegistry,
 ): InteractionExtractionResult => {
-  const listeners = Array.isArray(scenario.listeners)
-    ? scenario.listeners.filter(isRecord)
+  const domainEntries = Array.isArray(scenario.domains)
+    ? scenario.domains.filter(isRecord)
     : [];
+
+  const eventOwners = new Map<string, string>();
+
+  domainEntries.forEach((domain) => {
+    const domainId = typeof domain.id === "string" && domain.id.trim().length > 0
+      ? domain.id.trim()
+      : null;
+
+    if (!domainId) {
+      return;
+    }
+
+    const events = Array.isArray(domain.events)
+      ? domain.events.filter(isRecord)
+      : [];
+
+    events.forEach((event) => {
+      if (typeof event.name === "string" && event.name.trim().length > 0) {
+        eventOwners.set(event.name.trim(), domainId);
+      }
+    });
+  });
 
   const interactions: string[] = [];
   const notes: string[] = [];
   const seenInteractions = new Set<string>();
 
-  listeners.forEach((listener) => {
-    const baseEvent = isRecord(listener.on) && typeof listener.on.event === "string"
-      ? listener.on.event.trim()
+  domainEntries.forEach((domain) => {
+    const domainId = typeof domain.id === "string" && domain.id.trim().length > 0
+      ? domain.id.trim()
       : null;
 
-    const actions = Array.isArray(listener.actions)
-      ? listener.actions.filter(isRecord)
+    const listeners = Array.isArray(domain.listeners)
+      ? domain.listeners.filter(isRecord)
       : [];
 
-    const sourceDomain = inferSourceDomain(listener);
+    listeners.forEach((listener) => {
+      const baseEvent = isRecord(listener.on) && typeof listener.on.event === "string"
+        ? listener.on.event.trim()
+        : null;
 
-    actions.forEach((action) => {
-      const type = typeof action.type === "string" ? action.type : null;
-      if (type !== "emit" && type !== "forward-event") {
-        return;
-      }
+      const actions = Array.isArray(listener.actions)
+        ? listener.actions.filter(isRecord)
+        : [];
 
-      const eventName = typeof action.event === "string"
-        ? action.event.trim()
-        : baseEvent;
+      const sourceDomain = inferSourceDomain(listener, domainId);
 
-      const targetDomain = typeof action.toDomain === "string" && action.toDomain.trim().length > 0
-        ? action.toDomain.trim()
-        : typeof action.domain === "string" && action.domain.trim().length > 0
-          ? action.domain.trim()
-          : null;
+      actions.forEach((action) => {
+        const type = typeof action.type === "string" ? action.type : null;
+        if (type !== "emit" && type !== "forward-event") {
+          return;
+        }
 
-      if (!eventName) {
-        notes.push("Evento emitido sin nombre conocido.");
-        return;
-      }
+        const eventName = typeof action.event === "string"
+          ? action.event.trim()
+          : baseEvent;
 
-      if (!sourceDomain || !targetDomain) {
-        const missing = !sourceDomain ? "origen" : "destino";
-        notes.push(`No se pudo determinar el ${missing} para "${eventName}".`);
-        return;
-      }
+        const targetDomain = typeof action.toDomain === "string" && action.toDomain.trim().length > 0
+          ? action.toDomain.trim()
+          : eventName
+            ? eventOwners.get(eventName) ?? null
+            : null;
 
-      const source = registerParticipant(registry, sourceDomain, sourceDomain);
-      const target = registerParticipant(registry, targetDomain, targetDomain);
+        if (!eventName) {
+          notes.push("Evento emitido sin nombre conocido.");
+          return;
+        }
 
-      const key = `${source.alias}->${target.alias}:${eventName}`;
-      if (seenInteractions.has(key)) {
-        return;
-      }
+        if (!sourceDomain || !targetDomain) {
+          const missing = !sourceDomain ? "origen" : "destino";
+          notes.push(`No se pudo determinar el ${missing} para "${eventName}".`);
+          return;
+        }
 
-      seenInteractions.add(key);
-      interactions.push(`${source.alias}->>${target.alias}: ${formatEventLabel(eventName)}`);
+        const source = registerParticipant(registry, sourceDomain, sourceDomain);
+        const target = registerParticipant(registry, targetDomain, targetDomain);
+
+        const key = `${source.alias}->${target.alias}:${eventName}`;
+        if (seenInteractions.has(key)) {
+          return;
+        }
+
+        seenInteractions.add(key);
+        interactions.push(`${source.alias}->>${target.alias}: ${formatEventLabel(eventName)}`);
+      });
     });
   });
 

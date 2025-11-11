@@ -10,9 +10,7 @@ export type {
   ScalarMapping,
   ObjectMapping,
   ArrayObjectMapping,
-  EmitMapping,
-  NormalizedScenario,
-  NestedDomain
+  EmitMapping
 } from './schema.js';
 export { scenarioSchema, normalizeScenario } from './schema.js';
 

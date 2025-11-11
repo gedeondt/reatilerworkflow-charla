@@ -1,5 +1,3 @@
-import { isDeepStrictEqual } from 'node:util';
-
 import { z } from '@reatiler/shared/z';
 
 const domainSchema = z
@@ -405,25 +403,24 @@ const validateArrayMappingDefinition = ({
 
 type EmitValidationOptions = {
   ctx: z.RefinementCtx;
-  listenerIndex: number;
-  actionIndex: number;
+  basePath: (string | number)[];
   action: Extract<ListenerAction, { type: 'emit' }>;
   sourceEvent: ScenarioEvent | undefined;
   destinationEvent: ScenarioEvent;
+  sourceEventName: string;
 };
 
 const validateEmitMappingDefinition = ({
   ctx,
-  listenerIndex,
-  actionIndex,
+  basePath,
   action,
   sourceEvent,
-  destinationEvent
+  destinationEvent,
+  sourceEventName
 }: EmitValidationOptions): void => {
   const sourceSchema = sourceEvent?.payloadSchema;
   const destinationSchema = destinationEvent.payloadSchema;
-  const basePath: (string | number)[] = ['listeners', listenerIndex, 'actions', actionIndex];
-  const sourceEventName = sourceEvent?.name ?? action.event;
+  const effectiveSourceName = sourceEvent?.name ?? sourceEventName;
 
   const pushIssue = (message: string, path: (string | number)[]) => {
     ctx.addIssue({
@@ -466,7 +463,7 @@ const validateEmitMappingDefinition = ({
         mappingValue: fieldMapping,
         destinationType: fieldSchema as PayloadPrimitive,
         baseSchema: sourceSchema,
-        baseDescription: `event "${sourceEventName}" payload`,
+        baseDescription: `event "${effectiveSourceName}" payload`,
         path: ['mapping', fieldName],
         pushIssue,
         targetEventName: action.event
@@ -491,7 +488,7 @@ const validateEmitMappingDefinition = ({
         sourceSchema,
         pushIssue,
         targetEventName: action.event,
-        sourceEventName
+        sourceEventName: effectiveSourceName
       });
 
       return;
@@ -512,7 +509,7 @@ const validateEmitMappingDefinition = ({
       sourceSchema,
       pushIssue,
       targetEventName: action.event,
-      sourceEventName
+      sourceEventName: effectiveSourceName
     });
   });
 };
@@ -530,7 +527,7 @@ const emitActionSchema = z
   .object({
     type: z.literal('emit'),
     event: z.string().min(1, 'Emit action requires an event name'),
-    toDomain: z.string().min(1, 'Emit action requires a target domain'),
+    toDomain: z.string().min(1).optional(),
     mapping: emitMappingSchema
   })
   .strict();
@@ -538,7 +535,6 @@ const emitActionSchema = z
 const setStateActionSchema = z
   .object({
     type: z.literal('set-state'),
-    domain: z.string().min(1, 'Set-state action requires a domain id'),
     status: z.string().min(1, 'Set-state action requires a status')
   })
   .strict();
@@ -562,288 +558,137 @@ const listenerSchema = z
 
 export type Listener = z.infer<typeof listenerSchema>;
 
-const scenarioBaseSchema = z
-  .object({
-    name: z.string().min(1, 'Scenario name must be a non-empty string'),
-    version: z.number().int().min(0, 'Scenario version must be a positive integer'),
-    domains: z.array(domainSchema).min(1, 'Scenario must declare at least one domain'),
-    events: z.array(eventSchema).min(1, 'Scenario must declare at least one event'),
-    listeners: z.array(listenerSchema)
-  })
-  .strict();
-
-type ScenarioDraft = z.infer<typeof scenarioBaseSchema>;
-
-const validateScenario: z.SuperRefinement<ScenarioDraft> = (scenario, ctx) => {
-  const domainIds = new Set<string>();
-
-  scenario.domains.forEach((domain, index) => {
-    if (domainIds.has(domain.id)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Domain id "${domain.id}" is declared more than once`,
-        path: ['domains', index, 'id']
-      });
-      return;
-    }
-
-    domainIds.add(domain.id);
-  });
-
-  const domainById = new Map<string, Domain>(scenario.domains.map((domain) => [domain.id, domain]));
-
-  const eventNames = new Set<string>();
-  const eventByName = new Map<string, ScenarioEvent>();
-
-  scenario.events.forEach((event, index) => {
-    if (eventNames.has(event.name)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Event "${event.name}" is declared more than once`,
-        path: ['events', index, 'name']
-      });
-      return;
-    }
-
-    eventNames.add(event.name);
-    eventByName.set(event.name, event);
-  });
-
-  const listenerIds = new Set<string>();
-
-  scenario.listeners.forEach((listener, index) => {
-    if (listenerIds.has(listener.id)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Listener id "${listener.id}" is declared more than once`,
-        path: ['listeners', index, 'id']
-      });
-    } else {
-      listenerIds.add(listener.id);
-    }
-
-    if (!eventNames.has(listener.on.event)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Listener "${listener.id}" references unknown event "${listener.on.event}"`,
-        path: ['listeners', index, 'on', 'event']
-      });
-    }
-
-    listener.actions.forEach((action, actionIndex) => {
-      if (action.type === 'set-state') {
-        if (!domainById.has(action.domain)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Action ${action.type} references unknown domain "${action.domain}"`,
-            path: ['listeners', index, 'actions', actionIndex, 'domain']
-          });
-        }
-      }
-
-      if (action.type === 'emit') {
-        if (!eventNames.has(action.event)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Action emit references unknown event "${action.event}"`,
-            path: ['listeners', index, 'actions', actionIndex, 'event']
-          });
-        }
-
-        if (!domainById.has(action.toDomain)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Action emit references unknown domain "${action.toDomain}"`,
-            path: ['listeners', index, 'actions', actionIndex, 'toDomain']
-          });
-        }
-
-        const destinationEvent = eventByName.get(action.event);
-
-        if (destinationEvent) {
-          const sourceEvent = eventByName.get(listener.on.event);
-
-          validateEmitMappingDefinition({
-            ctx,
-            listenerIndex: index,
-            actionIndex,
-            action,
-            sourceEvent,
-            destinationEvent
-          });
-        }
-      }
-    });
-  });
-};
-
-export const scenarioSchema = scenarioBaseSchema.superRefine(validateScenario);
-
-export type Scenario = z.infer<typeof scenarioSchema>;
-
-const nestedDomainSchema = domainSchema
+const domainWithDeclarationsSchema = domainSchema
   .extend({
     events: z.array(eventSchema).optional(),
     listeners: z.array(listenerSchema).optional()
   })
   .strict();
 
-export type NestedDomain = z.infer<typeof nestedDomainSchema>;
-
-const rawScenarioSchema = z
+const scenarioStructureSchema = z
   .object({
     name: z.string().min(1, 'Scenario name must be a non-empty string'),
     version: z.number().int().min(0, 'Scenario version must be a positive integer'),
-    domains: z.array(nestedDomainSchema).min(1, 'Scenario must declare at least one domain'),
-    events: z.array(eventSchema).optional(),
-    listeners: z.array(listenerSchema).optional()
+    domains: z
+      .array(domainWithDeclarationsSchema)
+      .min(1, 'Scenario must declare at least one domain')
   })
   .strict();
 
-const createIssue = (message: string, path: (string | number)[]): z.ZodIssue => ({
-  code: z.ZodIssueCode.custom,
-  message,
-  path
-});
+type ScenarioDraft = z.infer<typeof scenarioStructureSchema>;
 
-const formatEventConflictMessage = (eventName: string): string =>
-  `Event "${eventName}" is declared more than once with different definitions`;
+type EventRegistryEntry = { domainId: string; event: ScenarioEvent };
 
-const addTopLevelEvent = (
-  events: ScenarioEvent[],
-  eventByName: Map<string, ScenarioEvent>,
-  issues: z.ZodIssue[],
-  event: ScenarioEvent,
-  path: (string | number)[],
-) => {
-  if (eventByName.has(event.name)) {
-    issues.push(createIssue(`Event "${event.name}" is declared more than once`, path));
-    return;
-  }
-
-  events.push(event);
-  eventByName.set(event.name, event);
-};
-
-const addNestedEvent = (
-  events: ScenarioEvent[],
-  eventByName: Map<string, ScenarioEvent>,
-  issues: z.ZodIssue[],
-  event: ScenarioEvent,
-  path: (string | number)[],
-) => {
-  const existing = eventByName.get(event.name);
-
-  if (!existing) {
-    events.push(event);
-    eventByName.set(event.name, event);
-    return;
-  }
-
-  if (!isDeepStrictEqual(existing, event)) {
-    issues.push(createIssue(formatEventConflictMessage(event.name), path));
-  }
-};
-
-const addTopLevelListener = (
-  listeners: Listener[],
-  listenerById: Map<string, Listener>,
-  issues: z.ZodIssue[],
-  listener: Listener,
-  path: (string | number)[],
-) => {
-  if (listenerById.has(listener.id)) {
-    issues.push(createIssue(`Listener id "${listener.id}" is declared more than once`, path));
-    return;
-  }
-
-  listeners.push(listener);
-  listenerById.set(listener.id, listener);
-};
-
-const addNestedListener = (
-  listeners: Listener[],
-  listenerById: Map<string, Listener>,
-  issues: z.ZodIssue[],
-  listener: Listener,
-  path: (string | number)[],
-) => {
-  if (listenerById.has(listener.id)) {
-    issues.push(
-      createIssue(`Listener id "${listener.id}" is declared more than once`, path),
-    );
-    return;
-  }
-
-  listeners.push(listener);
-  listenerById.set(listener.id, listener);
-};
-
-export type NormalizedScenario = Scenario;
-
-export const normalizeScenario = (raw: unknown): NormalizedScenario => {
-  const parsed = rawScenarioSchema.safeParse(raw);
-
-  if (!parsed.success) {
-    throw parsed.error;
-  }
-
-  const scenario = parsed.data;
-  const issues: z.ZodIssue[] = [];
-
-  const domains = scenario.domains.map(({ id, queue }) => ({ id, queue }));
-
-  const events: ScenarioEvent[] = [];
-  const eventByName = new Map<string, ScenarioEvent>();
-
-  (scenario.events ?? []).forEach((event, index) => {
-    addTopLevelEvent(events, eventByName, issues, event, ['events', index, 'name']);
-  });
+const validateScenario: z.SuperRefinement<ScenarioDraft> = (scenario, ctx) => {
+  const domainIds = new Set<string>();
+  const eventByName = new Map<string, EventRegistryEntry>();
+  const listenerIds = new Set<string>();
 
   scenario.domains.forEach((domain, domainIndex) => {
+    if (domainIds.has(domain.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Domain id "${domain.id}" is declared more than once`,
+        path: ['domains', domainIndex, 'id']
+      });
+    } else {
+      domainIds.add(domain.id);
+    }
+
     domain.events?.forEach((event, eventIndex) => {
-      addNestedEvent(
-        events,
-        eventByName,
-        issues,
-        event,
-        ['domains', domainIndex, 'events', eventIndex, 'name'],
-      );
+      const existing = eventByName.get(event.name);
+
+      if (existing) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Event "${event.name}" is declared more than once`,
+          path: ['domains', domainIndex, 'events', eventIndex, 'name']
+        });
+        return;
+      }
+
+      eventByName.set(event.name, { domainId: domain.id, event });
     });
   });
 
-  const listeners: Listener[] = [];
-  const listenerById = new Map<string, Listener>();
-
-  (scenario.listeners ?? []).forEach((listener, index) => {
-    addTopLevelListener(listeners, listenerById, issues, listener, [
-      'listeners',
-      index,
-      'id',
-    ]);
-  });
+  if (eventByName.size === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Scenario must declare at least one event within its domains',
+      path: ['domains']
+    });
+  }
 
   scenario.domains.forEach((domain, domainIndex) => {
     domain.listeners?.forEach((listener, listenerIndex) => {
-      addNestedListener(
-        listeners,
-        listenerById,
-        issues,
-        listener,
-        ['domains', domainIndex, 'listeners', listenerIndex, 'id'],
-      );
+      const listenerPath: (string | number)[] = [
+        'domains',
+        domainIndex,
+        'listeners',
+        listenerIndex
+      ];
+
+      if (listenerIds.has(listener.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Listener id "${listener.id}" is declared more than once`,
+          path: [...listenerPath, 'id']
+        });
+      } else {
+        listenerIds.add(listener.id);
+      }
+
+      const sourceEventEntry = eventByName.get(listener.on.event);
+
+      if (!sourceEventEntry) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Listener "${listener.id}" references unknown event "${listener.on.event}"`,
+          path: [...listenerPath, 'on', 'event']
+        });
+      }
+
+      listener.actions.forEach((action, actionIndex) => {
+        const actionPath = [...listenerPath, 'actions', actionIndex];
+
+        if (action.type === 'emit') {
+          const destinationEntry = eventByName.get(action.event);
+
+          if (!destinationEntry) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Action emit references unknown event "${action.event}"`,
+              path: [...actionPath, 'event']
+            });
+            return;
+          }
+
+          if (action.toDomain && action.toDomain !== destinationEntry.domainId) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Action emit references domain "${action.toDomain}" but event "${action.event}" belongs to domain "${destinationEntry.domainId}"`,
+              path: [...actionPath, 'toDomain']
+            });
+          }
+
+          validateEmitMappingDefinition({
+            ctx,
+            basePath: actionPath,
+            action,
+            sourceEvent: sourceEventEntry?.event,
+            destinationEvent: destinationEntry.event,
+            sourceEventName: listener.on.event
+          });
+        }
+      });
     });
   });
-
-  if (issues.length > 0) {
-    throw new z.ZodError(issues);
-  }
-
-  return scenarioSchema.parse({
-    name: scenario.name,
-    version: scenario.version,
-    domains,
-    events,
-    listeners
-  });
 };
+
+export const scenarioSchema = scenarioStructureSchema.superRefine(validateScenario);
+
+export type Scenario = z.infer<typeof scenarioSchema>;
+
+export function normalizeScenario(raw: unknown): Scenario {
+  return scenarioSchema.parse(raw);
+}

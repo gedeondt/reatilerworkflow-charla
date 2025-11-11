@@ -23,56 +23,65 @@ function createBaseScenario(): Scenario {
     name: 'Test scenario',
     version: 1,
     domains: [
-      { id: 'order', queue: 'queue-order' },
-      { id: 'payment', queue: 'queue-payment' }
-    ],
-    events: [
       {
-        name: 'OrderCreated',
-        payloadSchema: {
-          orderId: 'string',
-          amount: 'number',
-          paymentMethod: {
-            type: 'string',
-            lastFour: 'string'
-          }
-        }
-      },
-      {
-        name: 'PaymentRequested',
-        payloadSchema: {
-          orderId: 'string',
-          amount: 'number',
-          paymentMethod: {
-            type: 'string',
-            lastFour: 'string'
-          }
-        }
-      }
-    ],
-    listeners: [
-      {
-        id: 'on-order-created',
-        on: { event: 'OrderCreated' },
-        actions: [
-          { type: 'set-state', domain: 'order', status: 'CREATED' },
+        id: 'order',
+        queue: 'queue-order',
+        events: [
           {
-            type: 'emit',
-            event: 'PaymentRequested',
-            toDomain: 'payment',
-            mapping: {
-              orderId: 'orderId',
-              amount: 'amount',
+            name: 'OrderCreated',
+            payloadSchema: {
+              orderId: 'string',
+              amount: 'number',
               paymentMethod: {
-                objectFrom: 'paymentMethod',
-                map: {
-                  type: 'type',
-                  lastFour: 'lastFour'
-                }
+                type: 'string',
+                lastFour: 'string'
               }
             }
           }
+        ],
+        listeners: [
+          {
+            id: 'on-order-created',
+            on: { event: 'OrderCreated' },
+            actions: [
+              { type: 'set-state', status: 'CREATED' },
+              {
+                type: 'emit',
+                event: 'PaymentRequested',
+                toDomain: 'payment',
+                mapping: {
+                  orderId: 'orderId',
+                  amount: 'amount',
+                  paymentMethod: {
+                    objectFrom: 'paymentMethod',
+                    map: {
+                      type: 'type',
+                      lastFour: 'lastFour'
+                    }
+                  }
+                }
+              }
+            ]
+          }
         ]
+      },
+      {
+        id: 'payment',
+        queue: 'queue-payment',
+        events: [
+          {
+            name: 'PaymentRequested',
+            payloadSchema: {
+              orderId: 'string',
+              amount: 'number',
+              paymentMethod: {
+                type: 'string',
+                lastFour: 'string'
+              }
+            }
+          }
+        ],
+        listeners: []
       }
     ]
   };
@@ -105,13 +114,12 @@ describe('scenarioSchema', () => {
   });
 
   it('rejects duplicate event definitions', () => {
-    const duplicatedEvents = {
-      ...createBaseScenario(),
-      events: [
-        { name: 'OrderCreated', payloadSchema: { orderId: 'string' } },
-        { name: 'OrderCreated', payloadSchema: { orderId: 'string' } }
-      ]
-    };
+    const duplicatedEvents = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+
+    duplicatedEvents.domains[1].events?.push({
+      name: 'OrderCreated',
+      payloadSchema: { orderId: 'string' }
+    });
 
     const result = scenarioSchema.safeParse(duplicatedEvents);
 
@@ -123,19 +131,34 @@ describe('scenarioSchema', () => {
   });
 
   it('rejects listeners referencing unknown domains or events', () => {
-    const invalidListenerScenario = {
-      ...createBaseScenario(),
-      listeners: [
+    const invalidListenerScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+    const listener = invalidListenerScenario.domains[0].listeners?.[0];
+
+    expect(listener).toBeDefined();
+
+    if (listener) {
+      listener.on.event = 'NonExistingEvent';
+      listener.actions = [
+        { type: 'set-state', status: 'CREATED' },
+        { type: 'emit', event: 'UnknownEvent', toDomain: 'order', mapping: {} },
         {
-          id: 'invalid-listener',
-          on: { event: 'NonExistingEvent' },
-          actions: [
-            { type: 'set-state', domain: 'missing-domain', status: 'ANY' },
-            { type: 'emit', event: 'NonExistingEvent', toDomain: 'missing-domain', mapping: {} }
-          ]
+          type: 'emit',
+          event: 'PaymentRequested',
+          toDomain: 'order',
+          mapping: {
+            orderId: 'orderId',
+            amount: 'amount',
+            paymentMethod: {
+              objectFrom: 'paymentMethod',
+              map: {
+                type: 'type',
+                lastFour: 'lastFour'
+              }
+            }
+          }
         }
-      ]
-    };
+      ];
+    }
 
     const result = scenarioSchema.safeParse(invalidListenerScenario);
 
@@ -144,20 +167,17 @@ describe('scenarioSchema', () => {
       const messages = result.error.issues.map((issue) => issue.message);
       expect(messages).toEqual(
         expect.arrayContaining([
-          'Listener "invalid-listener" references unknown event "NonExistingEvent"',
-          'Action set-state references unknown domain "missing-domain"',
-          'Action emit references unknown event "NonExistingEvent"',
-          'Action emit references unknown domain "missing-domain"'
+          'Listener "on-order-created" references unknown event "NonExistingEvent"',
+          'Action emit references unknown event "UnknownEvent"',
+          'Action emit references domain "order" but event "PaymentRequested" belongs to domain "payment"'
         ])
       );
     }
   });
 
   it('rejects events without payload schema definitions', () => {
-    const missingPayload = JSON.parse(JSON.stringify(createBaseScenario())) as {
-      events: Array<Record<string, unknown>>;
-    };
-    delete missingPayload.events[0].payloadSchema;
+    const missingPayload = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+    delete missingPayload.domains[0].events?.[0]?.payloadSchema;
 
     const result = scenarioSchema.safeParse(missingPayload);
 
@@ -169,17 +189,17 @@ describe('scenarioSchema', () => {
   });
 
   it('rejects payload schemas with nested objects beyond one level', () => {
-    const invalidPayload = JSON.parse(JSON.stringify(createBaseScenario())) as {
-      events: Array<Record<string, unknown>>;
-    };
-    invalidPayload.events[0].payloadSchema = {
-      orderId: 'string',
-      nested: {
-        inner: {
-          detail: 'string'
+    const invalidPayload = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+    if (invalidPayload.domains[0].events?.[0]) {
+      invalidPayload.domains[0].events[0].payloadSchema = {
+        orderId: 'string',
+        nested: {
+          inner: {
+            detail: 'string'
+          }
         }
-      }
-    };
+      };
+    }
 
     const result = scenarioSchema.safeParse(invalidPayload);
 
@@ -191,13 +211,13 @@ describe('scenarioSchema', () => {
   });
 
   it('rejects payload schemas with arrays of arrays', () => {
-    const invalidPayload = JSON.parse(JSON.stringify(createBaseScenario())) as {
-      events: Array<Record<string, unknown>>;
-    };
-    invalidPayload.events[0].payloadSchema = {
-      orderId: 'string',
-      invalid: [['string']]
-    };
+    const invalidPayload = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+    if (invalidPayload.domains[0].events?.[0]) {
+      invalidPayload.domains[0].events[0].payloadSchema = {
+        orderId: 'string',
+        invalid: [['string']]
+      };
+    }
 
     const result = scenarioSchema.safeParse(invalidPayload);
 
@@ -205,23 +225,24 @@ describe('scenarioSchema', () => {
   });
 
   it('accepts payload schemas with arrays of flat objects', () => {
-    const validScenario = JSON.parse(JSON.stringify(createBaseScenario())) as {
-      events: Array<Record<string, unknown>>;
-    };
-    validScenario.events[0].payloadSchema = {
-      orderId: 'string',
-      amount: 'number',
-      paymentMethod: {
-        type: 'string',
-        lastFour: 'string'
-      },
-      lines: [
-        {
-          sku: 'string',
-          quantity: 'number'
-        }
-      ]
-    };
+    const validScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+
+    if (validScenario.domains[0].events?.[0]) {
+      validScenario.domains[0].events[0].payloadSchema = {
+        orderId: 'string',
+        amount: 'number',
+        paymentMethod: {
+          type: 'string',
+          lastFour: 'string'
+        },
+        lines: [
+          {
+            sku: 'string',
+            quantity: 'number'
+          }
+        ]
+      };
+    }
 
     const result = scenarioSchema.safeParse(validScenario);
 
@@ -230,7 +251,7 @@ describe('scenarioSchema', () => {
 
   it('rejects emit mappings missing destination fields', () => {
     const invalidScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
-    const emitAction = invalidScenario.listeners[0].actions.find(
+    const emitAction = invalidScenario.domains[0].listeners?.[0].actions.find(
       (action): action is Extract<typeof action, { type: 'emit' }> => action.type === 'emit'
     );
 
@@ -251,7 +272,7 @@ describe('scenarioSchema', () => {
 
   it('rejects emit mappings referencing unknown source fields', () => {
     const invalidScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
-    const emitAction = invalidScenario.listeners[0].actions.find(
+    const emitAction = invalidScenario.domains[0].listeners?.[0].actions.find(
       (action): action is Extract<typeof action, { type: 'emit' }> => action.type === 'emit'
     );
 
@@ -272,192 +293,15 @@ describe('scenarioSchema', () => {
 });
 
 describe('normalizeScenario', () => {
-  it('normalizes nested events and listeners into the flat representation', () => {
-    const raw = {
-      name: 'Nested Scenario',
-      version: 1,
-      domains: [
-        {
-          id: 'order',
-          queue: 'queue-order',
-          events: [
-            {
-              name: 'OrderCreated',
-              payloadSchema: { orderId: 'string' }
-            }
-          ],
-          listeners: [
-            {
-              id: 'on-order-created',
-              on: { event: 'OrderCreated' },
-              actions: [
-                { type: 'set-state', domain: 'order', status: 'CREATED' },
-                {
-                  type: 'emit',
-                  event: 'PaymentRequested',
-                  toDomain: 'payment',
-                  mapping: { orderId: 'orderId' }
-                }
-              ]
-            }
-          ]
-        },
-        {
-          id: 'payment',
-          queue: 'queue-payment',
-          events: [
-            {
-              name: 'PaymentRequested',
-              payloadSchema: { orderId: 'string' }
-            }
-          ],
-          listeners: [
-            {
-              id: 'on-payment-requested',
-              on: { event: 'PaymentRequested' },
-              actions: [
-                { type: 'set-state', domain: 'payment', status: 'REQUESTED' }
-              ]
-            }
-          ]
-        }
-      ]
-    } as const;
+  it('returns the scenario when the structure is valid', () => {
+    const scenario = createBaseScenario();
 
-    const normalized = normalizeScenario(raw);
+    const normalized = normalizeScenario(scenario);
 
-    expect(normalized.domains).toEqual([
-      { id: 'order', queue: 'queue-order' },
-      { id: 'payment', queue: 'queue-payment' }
-    ]);
-    expect(normalized.events.map((event) => event.name)).toEqual([
-      'OrderCreated',
-      'PaymentRequested'
-    ]);
-    expect(normalized.listeners.map((listener) => listener.id)).toEqual([
-      'on-order-created',
-      'on-payment-requested'
-    ]);
+    expect(normalized).toEqual(scenario);
   });
 
-  it('allows matching definitions between top-level and nested events', () => {
-    const raw = {
-      name: 'Duplicated Event Scenario',
-      version: 1,
-      domains: [
-        {
-          id: 'order',
-          queue: 'queue-order',
-          events: [
-            {
-              name: 'OrderCreated',
-              payloadSchema: { orderId: 'string' }
-            }
-          ]
-        }
-      ],
-      events: [
-        {
-          name: 'OrderCreated',
-          payloadSchema: { orderId: 'string' }
-        }
-      ],
-      listeners: []
-    } as const;
-
-    const normalized = normalizeScenario(raw);
-
-    expect(normalized.events).toHaveLength(1);
-    expect(normalized.events[0]).toEqual({
-      name: 'OrderCreated',
-      payloadSchema: { orderId: 'string' }
-    });
-  });
-
-  it('throws when nested events redefine an existing event differently', () => {
-    const conflicting = {
-      name: 'Conflict Scenario',
-      version: 1,
-      domains: [
-        {
-          id: 'order',
-          queue: 'queue-order',
-          events: [
-            {
-              name: 'OrderCreated',
-              payloadSchema: { orderId: 'string' }
-            }
-          ]
-        },
-        {
-          id: 'payment',
-          queue: 'queue-payment',
-          events: [
-            {
-              name: 'OrderCreated',
-              payloadSchema: { paymentId: 'string' }
-            }
-          ]
-        }
-      ]
-    } as const;
-
-    expect(() => normalizeScenario(conflicting)).toThrowError(z.ZodError);
-    try {
-      normalizeScenario(conflicting);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const messages = error.issues.map((issue) => issue.message);
-        expect(messages).toContain(
-          'Event "OrderCreated" is declared more than once with different definitions'
-        );
-      }
-    }
-  });
-
-  it('throws when listener identifiers collide between scopes', () => {
-    const conflictingListeners = {
-      name: 'Listener Conflict',
-      version: 1,
-      domains: [
-        {
-          id: 'order',
-          queue: 'queue-order',
-          events: [
-            { name: 'OrderCreated', payloadSchema: { orderId: 'string' } }
-          ],
-          listeners: [
-            {
-              id: 'duplicate-listener',
-              on: { event: 'OrderCreated' },
-              actions: [
-                { type: 'set-state', domain: 'order', status: 'CREATED' }
-              ]
-            }
-          ]
-        }
-      ],
-      listeners: [
-        {
-          id: 'duplicate-listener',
-          on: { event: 'OrderCreated' },
-          actions: [
-            { type: 'set-state', domain: 'order', status: 'CREATED' }
-          ]
-        }
-      ]
-    } as const;
-
-    expect(() => normalizeScenario(conflictingListeners)).toThrowError(z.ZodError);
-    try {
-      normalizeScenario(conflictingListeners);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        const messages = error.issues.map((issue) => issue.message);
-        expect(messages).toContain(
-          'Listener id "duplicate-listener" is declared more than once'
-        );
-      }
-    }
+  it('throws when the scenario is invalid', () => {
+    expect(() => normalizeScenario({})).toThrow(z.ZodError);
   });
 });

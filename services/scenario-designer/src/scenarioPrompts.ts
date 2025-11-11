@@ -22,12 +22,10 @@ Raíz del JSON:
 {
   "name": string,
   "version": number,
-  "domains": DomainSpec[],
-  "events"?: Event[],
-  "listeners"?: Listener[]
+  "domains": DomainSpec[]
 }
 
-DomainSpec (forma recomendada):
+DomainSpec:
 {
   "id": string,
   "queue": string,
@@ -35,8 +33,8 @@ DomainSpec (forma recomendada):
   "listeners"?: Listener[]
 }
 
-- Para escenarios nuevos, declara todos los eventos y listeners dentro del dominio correspondiente usando las claves "events" y "listeners" anidadas.
-- Las listas top-level "events" y "listeners" existen solo para compatibilidad con escenarios antiguos; no las utilices al generar nuevos escenarios.
+- TODOS los eventos y listeners deben declararse dentro de su dominio usando "domains[*].events" y "domains[*].listeners".
+- Está prohibido usar las listas top-level "events" o "listeners".
 
 Event:
 {
@@ -62,11 +60,12 @@ Listener:
 }
 
 Acciones válidas:
-- set-state → { "type": "set-state", "domain": string, "status": string }
-- emit → { "type": "emit", "event": string, "toDomain": string, "mapping": Mapping }
+- set-state → { "type": "set-state", "status": string }
+- emit → { "type": "emit", "event": string, "toDomain"?: string, "mapping": Mapping }
 
 - Los nombres de eventos son globales y únicos. Cualquier listener puede reaccionar al evento declarado en "on.event" sin importar el dominio que lo definió.
-- Los listeners pueden vivir en cualquier dominio; asegúrate de que su "id" sea único en todo el escenario.
+- Si defines "emit.toDomain", debe coincidir con el dominio que declaró ese evento. Si lo omites, se usa automáticamente el dominio propietario del evento destino.
+- Los listeners viven dentro de su dominio y su "id" debe ser único en todo el escenario.
 
 Reglas críticas para Mapping:
 - Cuando definas mapping para un evento destino:

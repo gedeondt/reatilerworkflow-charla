@@ -41,6 +41,8 @@ function delay(ms: number): Promise<void> {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+type ListenerContext = { listener: Listener; domainId: string };
+
 export function createScenarioRuntime({
   scenario,
   bus,
@@ -48,22 +50,21 @@ export function createScenarioRuntime({
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS
 }: ScenarioRuntimeOptions): ScenarioRuntime {
   const domainQueues = new Map<string, string>();
+  const listenersByEvent = new Map<string, ListenerContext[]>();
+  const eventsByName = new Map<string, { event: ScenarioEvent; domainId: string }>();
 
   for (const domain of scenario.domains) {
     domainQueues.set(domain.id, domain.queue);
-  }
 
-  const listenersByEvent = new Map<string, Listener[]>();
-  const eventsByName = new Map<string, ScenarioEvent>();
+    for (const event of domain.events ?? []) {
+      eventsByName.set(event.name, { event, domainId: domain.id });
+    }
 
-  for (const listener of scenario.listeners) {
-    const listeners = listenersByEvent.get(listener.on.event) ?? [];
-    listeners.push(listener);
-    listenersByEvent.set(listener.on.event, listeners);
-  }
-
-  for (const event of scenario.events) {
-    eventsByName.set(event.name, event);
+    for (const listener of domain.listeners ?? []) {
+      const contexts = listenersByEvent.get(listener.on.event) ?? [];
+      contexts.push({ listener, domainId: domain.id });
+      listenersByEvent.set(listener.on.event, contexts);
+    }
   }
 
   const state = new Map<string, Map<string, string>>();
@@ -82,22 +83,23 @@ export function createScenarioRuntime({
     envelope: EventEnvelope,
     listenerId: string
   ): Promise<void> {
-    const targetQueue = domainQueues.get(action.toDomain);
+    const destinationEntry = eventsByName.get(action.event);
 
-    if (!targetQueue) {
+    if (!destinationEntry) {
       logger.error(
-        { action: 'emit', toDomain: action.toDomain },
-        `Unable to emit event "${action.event}" because domain "${action.toDomain}" has no queue.`
+        { action: 'emit', event: action.event },
+        `Unable to emit event "${action.event}" because it is not defined in the scenario.`,
       );
       return;
     }
 
-    const destinationEvent = eventsByName.get(action.event);
+    const targetDomainId = action.toDomain ?? destinationEntry.domainId;
+    const targetQueue = domainQueues.get(targetDomainId);
 
-    if (!destinationEvent) {
+    if (!targetQueue) {
       logger.error(
-        { action: 'emit', event: action.event },
-        `Unable to emit event "${action.event}" because it is not defined in the scenario.`,
+        { action: 'emit', toDomain: targetDomainId },
+        `Unable to emit event "${action.event}" because domain "${targetDomainId}" has no queue.`
       );
       return;
     }
@@ -108,7 +110,7 @@ export function createScenarioRuntime({
 
     const mappedPayload = applyEmitMapping({
       sourcePayload,
-      destinationSchema: destinationEvent.payloadSchema,
+      destinationSchema: destinationEntry.event.payloadSchema,
       mapping: action.mapping,
       warn: ({ message, path }) => {
         logger.warn(
@@ -140,7 +142,7 @@ export function createScenarioRuntime({
     logger.info(
       {
         action: 'emit',
-        toDomain: action.toDomain,
+        toDomain: targetDomainId,
         event: action.event,
         correlationId: envelope.correlationId
       },
@@ -151,15 +153,16 @@ export function createScenarioRuntime({
   async function executeAction(
     action: ListenerAction,
     envelope: EventEnvelope,
-    listenerId: string
+    listenerId: string,
+    listenerDomainId: string
   ): Promise<void> {
     if (action.type === 'set-state') {
-      updateState(envelope.correlationId, action.domain, action.status);
+      updateState(envelope.correlationId, listenerDomainId, action.status);
 
       logger.debug({
         action: 'set-state',
         correlationId: envelope.correlationId,
-        domain: action.domain,
+        domain: listenerDomainId,
         status: action.status
       });
 
@@ -169,7 +172,12 @@ export function createScenarioRuntime({
     await executeEmit(action, envelope, listenerId);
   }
 
-  async function executeListener(listener: Listener, envelope: EventEnvelope): Promise<void> {
+  async function executeListener(
+    context: ListenerContext,
+    envelope: EventEnvelope
+  ): Promise<void> {
+    const { listener, domainId } = context;
+
     if (typeof listener.delayMs === 'number' && listener.delayMs > 0) {
       await delay(listener.delayMs);
     }
@@ -180,7 +188,7 @@ export function createScenarioRuntime({
       }
 
       try {
-        await executeAction(action, envelope, listener.id);
+        await executeAction(action, envelope, listener.id, domainId);
       } catch (error) {
         logger.error(
           { listener: listener.id, action, error },
@@ -191,9 +199,9 @@ export function createScenarioRuntime({
   }
 
   async function processEnvelope(envelope: EventEnvelope): Promise<void> {
-    const listeners = listenersByEvent.get(envelope.eventName);
+    const listenerContexts = listenersByEvent.get(envelope.eventName);
 
-    if (!listeners || listeners.length === 0) {
+    if (!listenerContexts || listenerContexts.length === 0) {
       logger.debug(
         { event: envelope.eventName },
         `No listeners registered for event "${envelope.eventName}".`
@@ -201,12 +209,12 @@ export function createScenarioRuntime({
       return;
     }
 
-    for (const listener of listeners) {
+    for (const context of listenerContexts) {
       if (!running) {
         break;
       }
 
-      await executeListener(listener, envelope);
+      await executeListener(context, envelope);
     }
   }
 

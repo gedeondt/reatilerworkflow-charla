@@ -22,7 +22,9 @@ describe('scenario loader', () => {
     const scenario = loadScenario('retailer-happy-path');
 
     expect(scenario.name).toBe('Retailer Happy Path Saga');
-    expect(scenario.listeners).not.toHaveLength(0);
+    expect(
+      scenario.domains.some((domain) => Array.isArray(domain.listeners) && domain.listeners.length > 0)
+    ).toBe(true);
   });
 
   it('throws a clear error when the scenario does not exist', () => {

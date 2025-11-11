@@ -1,12 +1,12 @@
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { dirname, extname, join } from 'node:path';
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
 import { z } from 'zod';
-import { normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
+import { loadScenario, normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
 
 type TraceEvent = {
   eventName: string;
@@ -443,62 +443,31 @@ const findBusinessDirectory = (startDir: string): string | null => {
 };
 
 const loadBusinessScenarioDefinition = async (name: string): Promise<Scenario> => {
-  const businessDir = findBusinessDirectory(process.cwd());
-
-  if (!businessDir) {
-    throw new HttpError(500, {
-      error: 'business_directory_not_found',
-      message: 'Business scenarios directory could not be located.',
-    });
-  }
-
-  const filePath = join(businessDir, `${name}.json`);
-
-  let raw: string;
-
   try {
-    raw = await readFile(filePath, 'utf8');
+    return loadScenario(name);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException)?.code;
+    const message = error instanceof Error ? error.message : String(error);
 
-    if (code === 'ENOENT') {
+    if (message.includes('not found')) {
       throw new HttpError(404, {
         error: 'scenario_not_found',
         message: `Scenario "${name}" was not found in business definitions.`,
       });
     }
 
-    throw new HttpError(500, {
-      error: 'scenario_read_failed',
-      message: `Unable to read scenario "${name}" from disk.`,
-      cause: error instanceof Error ? error.message : error,
-    });
-  }
-
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch (error) {
-    throw new HttpError(500, {
-      error: 'scenario_parse_failed',
-      message: `Scenario "${name}" contains invalid JSON.`,
-      cause: error instanceof Error ? error.message : error,
-    });
-  }
-
-  try {
-    return normalizeScenario(parsed);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (message.includes('Scenario validation failed')) {
       throw new HttpError(500, {
         error: 'invalid_scenario_definition',
         message: `Scenario "${name}" does not satisfy the scenario schema.`,
-        issues: error.issues.map((issue) => issue.message),
+        detail: message,
       });
     }
 
-    throw error;
+    throw new HttpError(500, {
+      error: 'scenario_load_failed',
+      message: `Unable to load scenario "${name}" from disk.`,
+      cause: message,
+    });
   }
 };
 
