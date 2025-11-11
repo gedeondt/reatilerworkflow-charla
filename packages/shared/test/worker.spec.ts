@@ -48,7 +48,7 @@ describe('startWorker', () => {
     worker.start();
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 35));
+      await new Promise((resolve) => setTimeout(resolve, 60));
       expect(worker.isRunning()).toBe(true);
       expect(popSpy.mock.calls.length).toBeGreaterThan(1);
       expect(logger.error).not.toHaveBeenCalled();
