@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import { z } from '@reatiler/shared/z';
 
 const domainSchema = z
@@ -678,3 +680,170 @@ const validateScenario: z.SuperRefinement<ScenarioDraft> = (scenario, ctx) => {
 export const scenarioSchema = scenarioBaseSchema.superRefine(validateScenario);
 
 export type Scenario = z.infer<typeof scenarioSchema>;
+
+const nestedDomainSchema = domainSchema
+  .extend({
+    events: z.array(eventSchema).optional(),
+    listeners: z.array(listenerSchema).optional()
+  })
+  .strict();
+
+export type NestedDomain = z.infer<typeof nestedDomainSchema>;
+
+const rawScenarioSchema = z
+  .object({
+    name: z.string().min(1, 'Scenario name must be a non-empty string'),
+    version: z.number().int().min(0, 'Scenario version must be a positive integer'),
+    domains: z.array(nestedDomainSchema).min(1, 'Scenario must declare at least one domain'),
+    events: z.array(eventSchema).optional(),
+    listeners: z.array(listenerSchema).optional()
+  })
+  .strict();
+
+const createIssue = (message: string, path: (string | number)[]): z.ZodIssue => ({
+  code: z.ZodIssueCode.custom,
+  message,
+  path
+});
+
+const formatEventConflictMessage = (eventName: string): string =>
+  `Event "${eventName}" is declared more than once with different definitions`;
+
+const addTopLevelEvent = (
+  events: ScenarioEvent[],
+  eventByName: Map<string, ScenarioEvent>,
+  issues: z.ZodIssue[],
+  event: ScenarioEvent,
+  path: (string | number)[],
+) => {
+  if (eventByName.has(event.name)) {
+    issues.push(createIssue(`Event "${event.name}" is declared more than once`, path));
+    return;
+  }
+
+  events.push(event);
+  eventByName.set(event.name, event);
+};
+
+const addNestedEvent = (
+  events: ScenarioEvent[],
+  eventByName: Map<string, ScenarioEvent>,
+  issues: z.ZodIssue[],
+  event: ScenarioEvent,
+  path: (string | number)[],
+) => {
+  const existing = eventByName.get(event.name);
+
+  if (!existing) {
+    events.push(event);
+    eventByName.set(event.name, event);
+    return;
+  }
+
+  if (!isDeepStrictEqual(existing, event)) {
+    issues.push(createIssue(formatEventConflictMessage(event.name), path));
+  }
+};
+
+const addTopLevelListener = (
+  listeners: Listener[],
+  listenerById: Map<string, Listener>,
+  issues: z.ZodIssue[],
+  listener: Listener,
+  path: (string | number)[],
+) => {
+  if (listenerById.has(listener.id)) {
+    issues.push(createIssue(`Listener id "${listener.id}" is declared more than once`, path));
+    return;
+  }
+
+  listeners.push(listener);
+  listenerById.set(listener.id, listener);
+};
+
+const addNestedListener = (
+  listeners: Listener[],
+  listenerById: Map<string, Listener>,
+  issues: z.ZodIssue[],
+  listener: Listener,
+  path: (string | number)[],
+) => {
+  if (listenerById.has(listener.id)) {
+    issues.push(
+      createIssue(`Listener id "${listener.id}" is declared more than once`, path),
+    );
+    return;
+  }
+
+  listeners.push(listener);
+  listenerById.set(listener.id, listener);
+};
+
+export type NormalizedScenario = Scenario;
+
+export const normalizeScenario = (raw: unknown): NormalizedScenario => {
+  const parsed = rawScenarioSchema.safeParse(raw);
+
+  if (!parsed.success) {
+    throw parsed.error;
+  }
+
+  const scenario = parsed.data;
+  const issues: z.ZodIssue[] = [];
+
+  const domains = scenario.domains.map(({ id, queue }) => ({ id, queue }));
+
+  const events: ScenarioEvent[] = [];
+  const eventByName = new Map<string, ScenarioEvent>();
+
+  (scenario.events ?? []).forEach((event, index) => {
+    addTopLevelEvent(events, eventByName, issues, event, ['events', index, 'name']);
+  });
+
+  scenario.domains.forEach((domain, domainIndex) => {
+    domain.events?.forEach((event, eventIndex) => {
+      addNestedEvent(
+        events,
+        eventByName,
+        issues,
+        event,
+        ['domains', domainIndex, 'events', eventIndex, 'name'],
+      );
+    });
+  });
+
+  const listeners: Listener[] = [];
+  const listenerById = new Map<string, Listener>();
+
+  (scenario.listeners ?? []).forEach((listener, index) => {
+    addTopLevelListener(listeners, listenerById, issues, listener, [
+      'listeners',
+      index,
+      'id',
+    ]);
+  });
+
+  scenario.domains.forEach((domain, domainIndex) => {
+    domain.listeners?.forEach((listener, listenerIndex) => {
+      addNestedListener(
+        listeners,
+        listenerById,
+        issues,
+        listener,
+        ['domains', domainIndex, 'listeners', listenerIndex, 'id'],
+      );
+    });
+  });
+
+  if (issues.length > 0) {
+    throw new z.ZodError(issues);
+  }
+
+  return scenarioSchema.parse({
+    name: scenario.name,
+    version: scenario.version,
+    domains,
+    events,
+    listeners
+  });
+};

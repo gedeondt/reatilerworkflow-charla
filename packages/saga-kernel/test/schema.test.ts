@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { scenarioSchema, type Scenario } from '../src/schema.js';
+import { z } from '@reatiler/shared/z';
+
+import { normalizeScenario, scenarioSchema, type Scenario } from '../src/schema.js';
 
 const TEST_DIR = fileURLToPath(new URL('.', import.meta.url));
 const ROOT_DIR = resolve(TEST_DIR, '..', '..', '..');
@@ -265,6 +267,197 @@ describe('scenarioSchema', () => {
       expect(messages).toContain(
         'Emit mapping for event "PaymentRequested" references unknown field "unknownOrderId" in event "OrderCreated" payload'
       );
+    }
+  });
+});
+
+describe('normalizeScenario', () => {
+  it('normalizes nested events and listeners into the flat representation', () => {
+    const raw = {
+      name: 'Nested Scenario',
+      version: 1,
+      domains: [
+        {
+          id: 'order',
+          queue: 'queue-order',
+          events: [
+            {
+              name: 'OrderCreated',
+              payloadSchema: { orderId: 'string' }
+            }
+          ],
+          listeners: [
+            {
+              id: 'on-order-created',
+              on: { event: 'OrderCreated' },
+              actions: [
+                { type: 'set-state', domain: 'order', status: 'CREATED' },
+                {
+                  type: 'emit',
+                  event: 'PaymentRequested',
+                  toDomain: 'payment',
+                  mapping: { orderId: 'orderId' }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          id: 'payment',
+          queue: 'queue-payment',
+          events: [
+            {
+              name: 'PaymentRequested',
+              payloadSchema: { orderId: 'string' }
+            }
+          ],
+          listeners: [
+            {
+              id: 'on-payment-requested',
+              on: { event: 'PaymentRequested' },
+              actions: [
+                { type: 'set-state', domain: 'payment', status: 'REQUESTED' }
+              ]
+            }
+          ]
+        }
+      ]
+    } as const;
+
+    const normalized = normalizeScenario(raw);
+
+    expect(normalized.domains).toEqual([
+      { id: 'order', queue: 'queue-order' },
+      { id: 'payment', queue: 'queue-payment' }
+    ]);
+    expect(normalized.events.map((event) => event.name)).toEqual([
+      'OrderCreated',
+      'PaymentRequested'
+    ]);
+    expect(normalized.listeners.map((listener) => listener.id)).toEqual([
+      'on-order-created',
+      'on-payment-requested'
+    ]);
+  });
+
+  it('allows matching definitions between top-level and nested events', () => {
+    const raw = {
+      name: 'Duplicated Event Scenario',
+      version: 1,
+      domains: [
+        {
+          id: 'order',
+          queue: 'queue-order',
+          events: [
+            {
+              name: 'OrderCreated',
+              payloadSchema: { orderId: 'string' }
+            }
+          ]
+        }
+      ],
+      events: [
+        {
+          name: 'OrderCreated',
+          payloadSchema: { orderId: 'string' }
+        }
+      ],
+      listeners: []
+    } as const;
+
+    const normalized = normalizeScenario(raw);
+
+    expect(normalized.events).toHaveLength(1);
+    expect(normalized.events[0]).toEqual({
+      name: 'OrderCreated',
+      payloadSchema: { orderId: 'string' }
+    });
+  });
+
+  it('throws when nested events redefine an existing event differently', () => {
+    const conflicting = {
+      name: 'Conflict Scenario',
+      version: 1,
+      domains: [
+        {
+          id: 'order',
+          queue: 'queue-order',
+          events: [
+            {
+              name: 'OrderCreated',
+              payloadSchema: { orderId: 'string' }
+            }
+          ]
+        },
+        {
+          id: 'payment',
+          queue: 'queue-payment',
+          events: [
+            {
+              name: 'OrderCreated',
+              payloadSchema: { paymentId: 'string' }
+            }
+          ]
+        }
+      ]
+    } as const;
+
+    expect(() => normalizeScenario(conflicting)).toThrowError(z.ZodError);
+    try {
+      normalizeScenario(conflicting);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const messages = error.issues.map((issue) => issue.message);
+        expect(messages).toContain(
+          'Event "OrderCreated" is declared more than once with different definitions'
+        );
+      }
+    }
+  });
+
+  it('throws when listener identifiers collide between scopes', () => {
+    const conflictingListeners = {
+      name: 'Listener Conflict',
+      version: 1,
+      domains: [
+        {
+          id: 'order',
+          queue: 'queue-order',
+          events: [
+            { name: 'OrderCreated', payloadSchema: { orderId: 'string' } }
+          ],
+          listeners: [
+            {
+              id: 'duplicate-listener',
+              on: { event: 'OrderCreated' },
+              actions: [
+                { type: 'set-state', domain: 'order', status: 'CREATED' }
+              ]
+            }
+          ]
+        }
+      ],
+      listeners: [
+        {
+          id: 'duplicate-listener',
+          on: { event: 'OrderCreated' },
+          actions: [
+            { type: 'set-state', domain: 'order', status: 'CREATED' }
+          ]
+        }
+      ]
+    } as const;
+
+    expect(() => normalizeScenario(conflictingListeners)).toThrowError(z.ZodError);
+    try {
+      normalizeScenario(conflictingListeners);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const messages = error.issues.map((issue) => issue.message);
+        expect(messages).toContain(
+          'Listener id "duplicate-listener" is declared more than once'
+        );
+      }
     }
   });
 });

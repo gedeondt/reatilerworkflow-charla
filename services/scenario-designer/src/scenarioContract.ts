@@ -1,7 +1,7 @@
-import { scenarioSchema } from '@reatiler/saga-kernel';
-import { z } from 'zod';
+import { normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
+import { z } from '@reatiler/shared/z';
 
-export type ScenarioContract = z.infer<typeof scenarioSchema>;
+export type ScenarioContract = Scenario;
 
 export type InspectScenarioContractFailure =
   | { type: 'invalid_json'; errors: string[] }
@@ -28,21 +28,26 @@ export function inspectScenarioContract(raw: string | unknown): InspectScenarioC
     }
   }
 
-  const parsed = scenarioSchema.safeParse(value);
-  if (!parsed.success) {
-    const errors = parsed.error.issues.map((issue) => {
-      const path = issue.path.join('.');
-      return path ? `${path}: ${issue.message}` : issue.message;
-    });
+  try {
+    const scenario = normalizeScenario(value);
 
-    return {
-      ok: false,
-      failure: {
-        type: 'invalid_contract',
-        errors,
-      },
-    };
+    return { ok: true, scenario };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const errors = error.issues.map((issue) => {
+        const path = issue.path.join('.');
+        return path ? `${path}: ${issue.message}` : issue.message;
+      });
+
+      return {
+        ok: false,
+        failure: {
+          type: 'invalid_contract',
+          errors,
+        },
+      };
+    }
+
+    throw error;
   }
-
-  return { ok: true, scenario: parsed.data };
 }

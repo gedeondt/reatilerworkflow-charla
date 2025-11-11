@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { scenarioSchema, type Scenario } from './schema.js';
+import { z } from '@reatiler/shared/z';
+
+import { normalizeScenario, type Scenario } from './schema.js';
 
 const SCENARIO_DIR = 'business';
 
@@ -53,12 +55,14 @@ export function loadScenario(name: string): Scenario {
     );
   }
 
-  const parsedScenario = scenarioSchema.safeParse(jsonContent);
+  try {
+    return normalizeScenario(jsonContent);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const detail = error.issues.map((issue) => issue.message).join('; ');
+      throw new Error(`Scenario validation failed for "${filePath}": ${detail}.`);
+    }
 
-  if (!parsedScenario.success) {
-    const detail = parsedScenario.error.errors.map((issue) => issue.message).join('; ');
-    throw new Error(`Scenario validation failed for "${filePath}": ${detail}.`);
+    throw error;
   }
-
-  return parsedScenario.data;
 }

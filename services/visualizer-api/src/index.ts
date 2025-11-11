@@ -6,7 +6,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
 import { z } from 'zod';
-import { scenarioSchema, type Scenario } from '@reatiler/saga-kernel';
+import { normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
 
 type TraceEvent = {
   eventName: string;
@@ -167,9 +167,9 @@ const DraftSummarySchema = z
 
 type DraftSummary = z.infer<typeof DraftSummarySchema>;
 
-const ScenarioDefinitionSchema = scenarioSchema;
-
 type ScenarioDefinition = Scenario;
+
+const ScenarioDefinitionSchema = z.unknown();
 
 const ScenarioBootstrapEventSchema = z
   .object({
@@ -303,17 +303,19 @@ const fetchDraftScenarioDefinition = async (
       });
     }
 
-    const parsed = ScenarioDefinitionSchema.safeParse(response.data);
+    try {
+      return normalizeScenario(response.data);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        throw new HttpError(502, {
+          error: 'invalid_scenario_definition',
+          message: 'Generated scenario JSON is invalid.',
+          issues: error.issues.map((issue) => issue.message),
+        });
+      }
 
-    if (!parsed.success) {
-      throw new HttpError(502, {
-        error: 'invalid_scenario_definition',
-        message: 'Generated scenario JSON is invalid.',
-        issues: parsed.error.issues.map((issue) => issue.message),
-      });
+      throw error;
     }
-
-    return parsed.data;
   } catch (error) {
     if (error instanceof HttpError) {
       throw error;
@@ -485,17 +487,19 @@ const loadBusinessScenarioDefinition = async (name: string): Promise<Scenario> =
     });
   }
 
-  const validation = scenarioSchema.safeParse(parsed);
+  try {
+    return normalizeScenario(parsed);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new HttpError(500, {
+        error: 'invalid_scenario_definition',
+        message: `Scenario "${name}" does not satisfy the scenario schema.`,
+        issues: error.issues.map((issue) => issue.message),
+      });
+    }
 
-  if (!validation.success) {
-    throw new HttpError(500, {
-      error: 'invalid_scenario_definition',
-      message: `Scenario "${name}" does not satisfy the scenario schema.`,
-      issues: validation.error.issues.map((issue) => issue.message),
-    });
+    throw error;
   }
-
-  return validation.data;
 };
 
 const listBusinessScenarioNames = async (): Promise<string[]> => {

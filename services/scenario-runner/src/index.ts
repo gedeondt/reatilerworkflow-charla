@@ -11,7 +11,7 @@ import { z } from 'zod';
 import {
   createScenarioRuntime,
   loadScenario,
-  scenarioSchema,
+  normalizeScenario,
   type Scenario,
   type ScenarioRuntime
 } from '@reatiler/saga-kernel';
@@ -217,16 +217,18 @@ async function fetchRemoteScenarioDefinition(name: string): Promise<Scenario> {
       definition = (body as { definition?: unknown }).definition;
     }
 
-    const parsed = scenarioSchema.safeParse(definition);
+    try {
+      return normalizeScenario(definition);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const detail = error.issues.map((issue) => issue.message).join('; ');
+        throw new Error(
+          `Scenario definition from visualizer-api is invalid: ${detail}`,
+        );
+      }
 
-    if (!parsed.success) {
-      const detail = parsed.error.errors.map((issue) => issue.message).join('; ');
-      throw new Error(
-        `Scenario definition from visualizer-api is invalid: ${detail}`,
-      );
+      throw error;
     }
-
-    return parsed.data;
   } catch (error) {
     const status = (error as { status?: number }).status;
     const message = extractErrorMessage(error);
