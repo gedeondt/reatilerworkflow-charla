@@ -93,7 +93,20 @@ export function createScenarioRuntime({
       return;
     }
 
-    const targetDomainId = action.toDomain ?? destinationEntry.domainId;
+    if (action.toDomain && action.toDomain !== destinationEntry.domainId) {
+      logger.error(
+        {
+          action: 'emit',
+          event: action.event,
+          toDomain: action.toDomain,
+          expectedDomain: destinationEntry.domainId,
+        },
+        `Unable to emit event "${action.event}" because it belongs to domain "${destinationEntry.domainId}" but action targets "${action.toDomain}".`
+      );
+      return;
+    }
+
+    const targetDomainId = destinationEntry.domainId;
     const targetQueue = domainQueues.get(targetDomainId);
 
     if (!targetQueue) {

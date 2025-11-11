@@ -130,6 +130,22 @@ describe('scenarioSchema', () => {
     }
   });
 
+  it('rejects scenarios with top-level events or listeners', () => {
+    const invalidScenario = {
+      ...createBaseScenario(),
+      events: [],
+      listeners: []
+    } as unknown;
+
+    const result = scenarioSchema.safeParse(invalidScenario);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages.some((message) => message.includes('Unrecognized key(s) in object'))).toBe(true);
+    }
+  });
+
   it('rejects listeners referencing unknown domains or events', () => {
     const invalidListenerScenario = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
     const listener = invalidListenerScenario.domains[0].listeners?.[0];
