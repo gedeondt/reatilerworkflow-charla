@@ -63,6 +63,7 @@ describe('GET /scenario', () => {
       definition: scenario,
       origin: { type: 'draft', draftId: 'draft-1' },
       appliedAt: now,
+      updatedAt: now,
     });
     __testing.setActiveScenarioName('draft-scenario', 'draft');
 
@@ -78,6 +79,58 @@ describe('GET /scenario', () => {
 
     expect(payload).toMatchObject({ name: 'draft-scenario', source: 'draft' });
     expect(payload.definition).toEqual(scenario);
+  });
+});
+
+describe('POST /validate-scenario', () => {
+  it('validates a scenario using the kernel', async () => {
+    const scenario = loadScenario('retailer-happy-path');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/validate-scenario',
+      payload: { scenario },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const payload = response.json() as {
+      ok: boolean;
+      scenario: Scenario;
+      summary: { domainsCount: number; eventsCount: number; listenersCount: number };
+    };
+
+    expect(payload.ok).toBe(true);
+    expect(payload.scenario).toEqual(scenario);
+
+    const expectedSummary = {
+      domainsCount: scenario.domains.length,
+      eventsCount: scenario.domains.reduce(
+        (total, domain) => total + domain.events.length,
+        0,
+      ),
+      listenersCount: scenario.domains.reduce(
+        (total, domain) => total + domain.listeners.length,
+        0,
+      ),
+    };
+
+    expect(payload.summary).toEqual(expectedSummary);
+  });
+
+  it('returns structured errors when validation fails', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/validate-scenario',
+      payload: { scenario: {} },
+    });
+
+    expect(response.statusCode).toBe(422);
+
+    const payload = response.json() as { ok: boolean; errors: string[] };
+
+    expect(payload.ok).toBe(false);
+    expect(payload.errors.length).toBeGreaterThan(0);
   });
 });
 
@@ -525,6 +578,53 @@ describe('POST /scenario/apply', () => {
   });
 });
 
+describe('POST /scenario', () => {
+  it('applies a scenario definition payload after validation', async () => {
+    const scenario = loadScenario('retailer-happy-path');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/scenario',
+      payload: { scenario },
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const payload = response.json() as { ok: boolean; name: string; updatedAt?: string };
+    expect(payload.ok).toBe(true);
+    expect(payload.name).toBe(scenario.name);
+    expect(typeof payload.updatedAt).toBe('string');
+
+    expect(__testing.getActiveScenario()).toEqual({
+      name: scenario.name,
+      source: 'draft',
+    });
+
+    const dynamic = __testing
+      .listDynamicScenarios()
+      .find((item) => item.name === scenario.name);
+
+    expect(dynamic).toBeDefined();
+    expect(dynamic?.origin).toEqual({ type: 'designer' });
+    expect(dynamic?.definition).toEqual(scenario);
+    expect(dynamic?.updatedAt).toBeDefined();
+  });
+
+  it('returns validation errors for invalid definitions', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/scenario',
+      payload: { scenario: {} },
+    });
+
+    expect(response.statusCode).toBe(422);
+
+    const payload = response.json() as { ok: boolean; errors: string[] };
+    expect(payload.ok).toBe(false);
+    expect(payload.errors.length).toBeGreaterThan(0);
+  });
+});
+
 describe('GET /scenario-definition', () => {
   it('returns 404 when the scenario is not registered', async () => {
     const response = await app.inject({
@@ -571,6 +671,7 @@ describe('GET /scenario-definition', () => {
       definition,
       origin: { type: 'draft', draftId: 'draft-xyz' },
       appliedAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
     });
 
     const response = await app.inject({
@@ -629,6 +730,7 @@ describe('GET /scenario-bootstrap', () => {
       definition,
       origin: { type: 'draft', draftId: 'draft-abc' },
       appliedAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
       bootstrapExample: {
         queue: 'ventas',
         event: {

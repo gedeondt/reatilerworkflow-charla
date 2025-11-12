@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import mermaid from "mermaid";
+import React, { useEffect, useMemo, useState } from "react";
+import type MermaidAPI from "mermaid";
 
 const mermaidConfig = {
   startOnLoad: false,
   theme: "dark",
-  securityLevel: "strict" as const,
+  securityLevel: "loose" as const,
   themeVariables: {
     primaryColor: "#111827",
     primaryBorderColor: "#22c55e",
@@ -16,56 +16,59 @@ const mermaidConfig = {
   },
 };
 
+let mermaidPromise: Promise<MermaidAPI> | null = null;
 let initialized = false;
 
-const initializeMermaid = () => {
+const loadMermaid = async (): Promise<MermaidAPI> => {
+  if (!mermaidPromise) {
+    mermaidPromise = import("mermaid")
+      .then((module) => module.default ?? (module as unknown as MermaidAPI))
+      .catch((error) => {
+        mermaidPromise = null;
+        throw error;
+      });
+  }
+
+  const api = await mermaidPromise;
+
   if (!initialized) {
-    mermaid.initialize(mermaidConfig);
+    api.initialize(mermaidConfig);
     initialized = true;
   }
+
+  return api;
 };
 
 const generateId = () => `mermaid-${Math.random().toString(36).slice(2, 10)}`;
 
 type MermaidSequenceDiagramProps = {
-  definition: string;
+  code: string;
 };
 
 export const MermaidSequenceDiagram: React.FC<MermaidSequenceDiagramProps> = ({
-  definition,
+  code,
 }) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [html, setHtml] = useState<string>("");
   const renderId = useMemo(() => generateId(), []);
 
   useEffect(() => {
-    initializeMermaid();
-  }, []);
-
-  useEffect(() => {
-    const container = containerRef.current;
-
-    if (!container) {
-      return;
-    }
-
-    let isMounted = true;
-    container.innerHTML = "";
+    let cancelled = false;
     setRenderError(null);
+    setHtml("");
 
     const renderDiagram = async () => {
       try {
-        const { svg } = await mermaid.render(renderId, definition);
+        const api = await loadMermaid();
+        const { svg } = await api.render(renderId, code);
 
-        if (isMounted && containerRef.current) {
-          containerRef.current.innerHTML = svg;
+        if (!cancelled) {
+          setHtml(svg);
         }
       } catch (error) {
         console.error("Failed to render Mermaid diagram", error);
-        if (isMounted) {
-          setRenderError(
-            "No se pudo renderizar el diagrama de secuencia. Revisa el escenario generado.",
-          );
+        if (!cancelled) {
+          setRenderError("No se pudo renderizar diagrama.");
         }
       }
     };
@@ -73,9 +76,9 @@ export const MermaidSequenceDiagram: React.FC<MermaidSequenceDiagramProps> = ({
     void renderDiagram();
 
     return () => {
-      isMounted = false;
+      cancelled = true;
     };
-  }, [definition, renderId]);
+  }, [code, renderId]);
 
   return (
     <div className="space-y-2">
@@ -83,7 +86,10 @@ export const MermaidSequenceDiagram: React.FC<MermaidSequenceDiagramProps> = ({
         {renderError ? (
           <div className="text-red-400 text-[11px]">{renderError}</div>
         ) : (
-          <div ref={containerRef} className="min-h-full" />
+          <div
+            className="min-h-full"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
         )}
       </div>
     </div>

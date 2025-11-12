@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   applyScenarioDraft,
   createScenarioDraft,
@@ -19,9 +19,11 @@ import type {
   LogEntry,
   ScenarioListItem,
   ScenarioProposal,
+  ScenarioSummary,
   TraceView,
 } from "./types";
 import NewScenarioDiagram from "./NewScenarioDiagram";
+import { StepEditJson, type StepEditJsonHandle } from "./components/wizard/StepEditJson";
 
 type BootstrapHint = {
   queue: string;
@@ -67,6 +69,11 @@ export default function App() {
     { kind: "business" | "manual"; name?: string } | null
   >(null);
   const [designerError, setDesignerError] = useState<string | null>(null);
+  const stepEditJsonRef = useRef<StepEditJsonHandle | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const [designerValidationSummary, setDesignerValidationSummary] = useState<
+    ScenarioSummary | null
+  >(null);
   const [refinementFeedback, setRefinementFeedback] = useState<string>("");
   const [activeWizardStep, setActiveWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [step1Completed, setStep1Completed] = useState<boolean>(false);
@@ -317,11 +324,13 @@ export default function App() {
 
     if (!name) {
       setDesignerError(null);
+      setDesignerValidationSummary(null);
       return;
     }
 
     try {
       setDesignerError(null);
+      setDesignerValidationSummary(null);
 
       const definition = await fetchScenarioDefinition(name);
       const serialized = JSON.stringify(definition.definition, null, 2);
@@ -331,6 +340,9 @@ export default function App() {
       setStep1Completed(true);
       setStep1Error(null);
       setActiveWizardStep(2);
+      setTimeout(() => {
+        void stepEditJsonRef.current?.triggerValidation();
+      }, 0);
     } catch (err) {
       console.warn("Failed to load scenario definition", err);
       const message = err instanceof Error ? err.message : String(err);
@@ -339,6 +351,7 @@ export default function App() {
       } else {
         setDesignerError(`No se pudo cargar el escenario '${name}'.`);
       }
+      setDesignerValidationSummary(null);
     }
   };
 
@@ -346,6 +359,10 @@ export default function App() {
     event: React.ChangeEvent<HTMLTextAreaElement>,
   ) => {
     setDesignerJson(event.target.value);
+    setDesignerValidationSummary(null);
+    if (!activeDraftId) {
+      setStep2Message(null);
+    }
 
     if (designerSource) {
       setDesignerSource(null);
@@ -355,6 +372,24 @@ export default function App() {
       setDesignerError(null);
     }
   };
+
+  const handleManualScenarioApplied = useCallback(
+    ({ summary }: { scenario: unknown; summary: ScenarioSummary }) => {
+      setDesignerValidationSummary(summary);
+      setStep2Message("Escenario aplicado correctamente.");
+      setStep2Error(null);
+      setIsDesignerOpen(false);
+      setActiveWizardStep(3);
+      setStep4Error(null);
+      setStep4Message(null);
+    },
+    [],
+  );
+
+  const focusOnVisualization = useCallback(() => {
+    setIsDesignerOpen(false);
+    viewerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   const handleExistingDraftIdChange = (
     event: React.ChangeEvent<HTMLInputElement>,
@@ -706,11 +741,13 @@ export default function App() {
   const hasGeneratedScenarioAvailable = Boolean(
     scenarioPreviewData ?? draftSummary?.hasGeneratedScenario,
   );
-  const isStep2Enabled = Boolean(
-    activeDraftId || step1Completed || designerJson.trim().length > 0,
-  );
-  const isStep3Enabled = Boolean(activeDraftId);
-  const isStep4Enabled = Boolean(activeDraftId && hasGeneratedScenarioAvailable);
+  const designerJsonPresent = designerJson.trim().length > 0;
+  const manualScenarioReady = !activeDraftId && Boolean(designerValidationSummary);
+  const isStep2Enabled = Boolean(activeDraftId || step1Completed || designerJsonPresent);
+  const isStep3Enabled = activeDraftId ? Boolean(activeDraftId) : manualScenarioReady;
+  const isStep4Enabled = activeDraftId
+    ? Boolean(activeDraftId && hasGeneratedScenarioAvailable)
+    : manualScenarioReady;
 
   useEffect(() => {
     if (!isStep2Enabled && activeWizardStep > 1) {
@@ -904,6 +941,23 @@ export default function App() {
           );
         }
 
+        if (!activeDraftId) {
+          return (
+            <StepEditJson
+              ref={stepEditJsonRef}
+              designerJson={designerJson}
+              setDesignerJson={setDesignerJson}
+              onScenarioValidated={(summary) => {
+                setDesignerValidationSummary(summary);
+                if (!summary) {
+                  setStep2Message(null);
+                }
+              }}
+              onScenarioApplied={handleManualScenarioApplied}
+            />
+          );
+        }
+
         const proposal = currentProposal;
 
         return (
@@ -1048,6 +1102,41 @@ export default function App() {
         );
       }
       case 3: {
+        if (!activeDraftId) {
+          if (!designerValidationSummary) {
+            return (
+              <div className="text-zinc-500 text-[10px]">
+                Valida un escenario en el paso anterior para ver el resumen y aplicar.
+              </div>
+            );
+          }
+
+          return (
+            <div className="space-y-4">
+              <div className="border border-zinc-800 rounded px-3 py-3 bg-zinc-900 space-y-2">
+                <div className="uppercase text-[10px] text-zinc-500">
+                  Resumen de validación
+                </div>
+                <div className="text-[11px] text-zinc-300">
+                  Dominios: {designerValidationSummary.domainsCount} · Eventos: {" "}
+                  {designerValidationSummary.eventsCount} · Listeners: {" "}
+                  {designerValidationSummary.listenersCount}
+                </div>
+                {step2Message ? (
+                  <div className="text-green-400 text-[10px]">{step2Message}</div>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={focusOnVisualization}
+                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60"
+              >
+                Ver ejecución
+              </button>
+            </div>
+          );
+        }
+
         if (!isStep3Enabled) {
           return (
             <div className="text-zinc-500 text-[10px]">
@@ -1111,6 +1200,31 @@ export default function App() {
         );
       }
       case 4: {
+        if (!activeDraftId) {
+          if (!designerValidationSummary) {
+            return (
+              <div className="text-zinc-500 text-[10px]">
+                Valida un escenario para ver la vista previa.
+              </div>
+            );
+          }
+
+          return (
+            <div className="space-y-4">
+              <div className="text-[10px] text-zinc-500">
+                El escenario está aplicado. Observa la sección de ejecución en tiempo real para seguir los eventos.
+              </div>
+              <button
+                type="button"
+                onClick={focusOnVisualization}
+                className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60"
+              >
+                Ir a la ejecución
+              </button>
+            </div>
+          );
+        }
+
         if (!isStep4Enabled) {
           return (
             <div className="text-zinc-500 text-[10px]">
@@ -1307,7 +1421,7 @@ export default function App() {
       {header}
       {statusLine}
       {draftPanel}
-      <div className="flex-1 flex flex-col">
+      <div ref={viewerRef} className="flex-1 flex flex-col">
         {domains.length === 0 && !isLoading && !error ? (
           <div className="flex-1 flex items-center justify-center text-zinc-600 text-xs">
             <div className="text-center space-y-1">

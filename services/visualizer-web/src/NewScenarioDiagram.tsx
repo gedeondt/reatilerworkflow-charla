@@ -25,7 +25,7 @@ export const NewScenarioDiagram: React.FC<NewScenarioDiagramProps> = ({
 
   return (
     <div className="space-y-2">
-      <MermaidSequenceDiagram definition={diagramDefinition} />
+      <MermaidSequenceDiagram code={diagramDefinition} />
     </div>
   );
 };

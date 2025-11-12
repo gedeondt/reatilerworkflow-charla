@@ -11,6 +11,8 @@ import type {
   DraftCreationResponse,
   GenerateJsonResponse,
   ScenarioBootstrapResponse,
+  ValidateScenarioResponse,
+  ApplyScenarioPayloadResponse,
 } from "./types";
 
 const API_BASE =
@@ -108,6 +110,58 @@ export async function fetchScenarioBootstrap(): Promise<ScenarioBootstrapRespons
   }
 
   return res.json();
+}
+
+export async function validateScenario(
+  scenario: unknown,
+): Promise<ValidateScenarioResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/validate-scenario`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario }),
+    });
+
+    if (res.status === 422) {
+      return (await res.json()) as ValidateScenarioResponse;
+    }
+
+    if (!res.ok) {
+      throw new Error(await parseErrorResponse(res));
+    }
+
+    return (await res.json()) as ValidateScenarioResponse;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Error desconocido al validar";
+    throw new Error(`No se pudo validar el escenario: ${message}`);
+  }
+}
+
+export async function applyScenario(
+  scenario: unknown,
+): Promise<ApplyScenarioPayloadResponse> {
+  try {
+    const res = await fetch(`${API_BASE}/scenario`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario }),
+    });
+
+    if (res.status === 422) {
+      return (await res.json()) as ApplyScenarioPayloadResponse;
+    }
+
+    if (!res.ok) {
+      throw new Error(await parseErrorResponse(res));
+    }
+
+    return (await res.json()) as ApplyScenarioPayloadResponse;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Error desconocido al aplicar";
+    throw new Error(`No se pudo aplicar el escenario: ${message}`);
+  }
 }
 
 export async function applyScenarioByName(name: string): Promise<ApplyScenarioResponse> {

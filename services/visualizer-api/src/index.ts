@@ -6,7 +6,11 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
 import { z } from 'zod';
-import { loadScenario, normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
+import {
+  loadScenario,
+  normalizeScenario,
+  type Scenario,
+} from '@reatiler/saga-kernel';
 
 type TraceEvent = {
   eventName: string;
@@ -80,11 +84,16 @@ const SCENARIO_DESIGNER_BASE =
 
 type ScenarioSource = 'business' | 'draft';
 
+type DynamicScenarioOrigin =
+  | { type: 'draft'; draftId: string }
+  | { type: 'designer' };
+
 type DynamicScenarioRecord = {
   name: string;
   definition: Scenario;
-  origin: { type: 'draft'; draftId: string };
+  origin: DynamicScenarioOrigin;
   appliedAt: string;
+  updatedAt: string;
   bootstrapExample?: ScenarioBootstrapExample;
 };
 
@@ -123,6 +132,36 @@ const registerDynamicScenario = (record: DynamicScenarioRecord) => {
 const listDynamicScenarios = () => Array.from(dynamicScenarios.values());
 
 const clearDynamicScenarios = () => dynamicScenarios.clear();
+
+const zodToArray = (error: unknown): string[] => {
+  if (error instanceof z.ZodError) {
+    return error.issues.map((issue) => {
+      const path = issue.path.join('.') || undefined;
+      return path ? `${path}: ${issue.message}` : issue.message;
+    });
+  }
+
+  if (error instanceof Error && error.message) {
+    return [error.message];
+  }
+
+  return ['Unknown validation error'];
+};
+
+const buildSummary = (scenario: Scenario) => {
+  const domains = Array.isArray(scenario.domains) ? scenario.domains : [];
+  const domainsCount = domains.length;
+  const eventsCount = domains.reduce((total, domain) => {
+    const events = Array.isArray(domain.events) ? domain.events : [];
+    return total + events.length;
+  }, 0);
+  const listenersCount = domains.reduce((total, domain) => {
+    const listeners = Array.isArray(domain.listeners) ? domain.listeners : [];
+    return total + listeners.length;
+  }, 0);
+
+  return { domainsCount, eventsCount, listenersCount };
+};
 
 const listScenarioItems = async (): Promise<
   Array<{ name: string; source: ScenarioSource }>
@@ -504,11 +543,34 @@ await app.register(cors, { origin: true });
 
 app.get('/health', async () => ({ ok: true }));
 
+app.post<{ Body: { scenario?: unknown } }>('/validate-scenario', async (request, reply) => {
+  const { scenario } = request.body ?? {};
+
+  if (scenario === undefined) {
+    return reply
+      .status(422)
+      .send({ ok: false, errors: ['Missing scenario payload'] });
+  }
+
+  try {
+    const validated = normalizeScenario(scenario);
+    return reply.send({
+      ok: true,
+      scenario: validated,
+      summary: buildSummary(validated),
+    });
+  } catch (error) {
+    const errors = zodToArray(error);
+    return reply.status(422).send({ ok: false, errors });
+  }
+});
+
 app.get('/scenario', async (_request, reply) => {
   const { name, source } = getActiveScenario();
 
   try {
     let definition: Scenario;
+    let updatedAt: string | undefined;
 
     if (source === 'draft') {
       const record = dynamicScenarios.get(name);
@@ -521,11 +583,12 @@ app.get('/scenario', async (_request, reply) => {
       }
 
       definition = record.definition;
+      updatedAt = record.updatedAt;
     } else {
       definition = await loadBusinessScenarioDefinition(name);
     }
 
-    return reply.send({ name, source, definition });
+    return reply.send({ name, source, definition, updatedAt });
   } catch (error) {
     if (error instanceof HttpError) {
       return reply.status(error.status).send(error.payload);
@@ -645,9 +708,11 @@ app.post('/scenario/apply', async (request, reply) => {
         const record = dynamicScenarios.get(body.name);
 
         if (record) {
+          const timestamp = new Date().toISOString();
           registerDynamicScenario({
             ...record,
-            appliedAt: new Date().toISOString(),
+            appliedAt: timestamp,
+            updatedAt: timestamp,
           });
         }
       }
@@ -687,11 +752,14 @@ app.post('/scenario/apply', async (request, reply) => {
     }
     const scenarioName = definition.name;
 
+    const timestamp = new Date().toISOString();
+
     registerDynamicScenario({
       name: scenarioName,
       definition,
       origin: { type: 'draft', draftId: body.draftId },
-      appliedAt: new Date().toISOString(),
+      appliedAt: timestamp,
+      updatedAt: timestamp,
       bootstrapExample,
     });
 
@@ -711,40 +779,77 @@ app.post('/scenario/apply', async (request, reply) => {
   }
 });
 
-app.post<{ Body: { name?: unknown } }>('/scenario', async (request, reply) => {
-  const { name } = request.body ?? {};
+app.post<{ Body: { name?: unknown; scenario?: unknown } }>(
+  '/scenario',
+  async (request, reply) => {
+    const { name, scenario } = request.body ?? {};
 
-  if (typeof name !== 'string' || name.length === 0) {
-    return reply
-      .status(400)
-      .send({ error: 'Request body must include a scenario name.' });
-  }
+    if (scenario !== undefined) {
+      try {
+        const normalized = normalizeScenario(scenario);
+        const timestamp = new Date().toISOString();
+        const scenarioName = normalized.name;
 
-  try {
-    const source = await ensureScenarioExists(name);
+        if (!scenarioName) {
+          return reply
+            .status(422)
+            .send({ ok: false, errors: ['Scenario must include a name'] });
+        }
 
-    if (source === 'draft') {
-      const record = dynamicScenarios.get(name);
+        registerDynamicScenario({
+          name: scenarioName,
+          definition: normalized,
+          origin: { type: 'designer' },
+          appliedAt: timestamp,
+          updatedAt: timestamp,
+        });
 
-      if (record) {
-        registerDynamicScenario({ ...record, appliedAt: new Date().toISOString() });
+        setActiveScenario(scenarioName, 'draft');
+
+        return reply.send({ ok: true, name: scenarioName, updatedAt: timestamp });
+      } catch (error) {
+        const errors = zodToArray(error);
+        return reply.status(422).send({ ok: false, errors });
       }
     }
 
-    setActiveScenario(name, source);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return reply.status(error.status).send(error.payload);
+    if (typeof name !== 'string' || name.length === 0) {
+      return reply
+        .status(400)
+        .send({ error: 'Request body must include a scenario name.' });
     }
 
-    app.log.error({ err: error }, 'failed to validate scenario before switch');
-    return reply
-      .status(500)
-      .send({ error: 'Unable to validate requested scenario.' });
-  }
+    try {
+      const source = await ensureScenarioExists(name);
 
-  return reply.send({ name });
-});
+      if (source === 'draft') {
+        const record = dynamicScenarios.get(name);
+
+        if (record) {
+          const timestamp = new Date().toISOString();
+          registerDynamicScenario({
+            ...record,
+            appliedAt: timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      }
+
+      setActiveScenario(name, source);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return reply.status(error.status).send(error.payload);
+      }
+
+      app.log.error({ err: error }, 'failed to validate scenario before switch');
+      return reply
+        .status(500)
+        .send({ error: 'Unable to validate requested scenario.' });
+    }
+
+    return reply.send({ name });
+  },
+);
 
 app.get('/traces', async (_request, reply) => {
   try {

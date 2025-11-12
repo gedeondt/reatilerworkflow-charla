@@ -1,3 +1,5 @@
+import type { Scenario } from "@reatiler/saga-kernel";
+
 export type TraceView = {
   traceId: string;
   lastUpdatedAt: string;
@@ -24,6 +26,7 @@ export type LogEntry = {
 export type ScenarioResponse = {
   name: string;
   source?: 'business' | 'draft';
+  updatedAt?: string;
 };
 
 export type ScenarioListItem = {
@@ -103,3 +106,39 @@ export type GenerateJsonResponse = {
 export type ScenarioBootstrapResponse =
   | { hasBootstrap: false }
   | { hasBootstrap: true; queue: string; event: Record<string, unknown> };
+
+export type ScenarioSummary = {
+  domainsCount: number;
+  eventsCount: number;
+  listenersCount: number;
+};
+
+export type ValidateScenarioSuccess = {
+  ok: true;
+  scenario: Scenario;
+  summary: ScenarioSummary;
+};
+
+export type ValidateScenarioFailure = {
+  ok: false;
+  errors: string[];
+};
+
+export type ValidateScenarioResponse =
+  | ValidateScenarioSuccess
+  | ValidateScenarioFailure;
+
+export type ApplyScenarioPayloadSuccess = {
+  ok: true;
+  name: string;
+  updatedAt?: string;
+};
+
+export type ApplyScenarioPayloadFailure = {
+  ok: false;
+  errors: string[];
+};
+
+export type ApplyScenarioPayloadResponse =
+  | ApplyScenarioPayloadSuccess
+  | ApplyScenarioPayloadFailure;
