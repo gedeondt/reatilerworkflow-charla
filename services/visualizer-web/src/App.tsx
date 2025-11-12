@@ -64,11 +64,12 @@ export default function App() {
   const [isDesignerOpen, setIsDesignerOpen] = useState<boolean>(false);
   const [designerJson, setDesignerJson] = useState<string>("");
   const [designerSource, setDesignerSource] = useState<
-    { kind: 'business'; name: string } | null
+    { kind: "business" | "manual"; name?: string } | null
   >(null);
   const [designerError, setDesignerError] = useState<string | null>(null);
   const [refinementFeedback, setRefinementFeedback] = useState<string>("");
-  const [activeWizardStep, setActiveWizardStep] = useState<number>(1);
+  const [activeWizardStep, setActiveWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [step1Completed, setStep1Completed] = useState<boolean>(false);
   const [step1Error, setStep1Error] = useState<string | null>(null);
   const [step2Error, setStep2Error] = useState<string | null>(null);
   const [step2Message, setStep2Message] = useState<string | null>(null);
@@ -325,8 +326,10 @@ export default function App() {
       const definition = await fetchScenarioDefinition(name);
       const serialized = JSON.stringify(definition.definition, null, 2);
       setDesignerJson(serialized);
-      setDesignerSource({ kind: 'business', name: definition.name });
+      setDesignerSource({ kind: "business", name: definition.name });
       setIsDesignerOpen(true);
+      setStep1Completed(true);
+      setStep1Error(null);
       setActiveWizardStep(2);
     } catch (err) {
       console.warn("Failed to load scenario definition", err);
@@ -376,6 +379,7 @@ export default function App() {
     setCreatedDraft(null);
     setRefinementFeedback("");
     setActiveWizardStep(1);
+    setStep1Completed(false);
     setStep1Error(null);
     setStep2Error(null);
     setStep2Message(null);
@@ -409,6 +413,7 @@ export default function App() {
       setCreatedDraft(draft);
       setCurrentProposal(draft.currentProposal);
       setExistingDraftIdInput(draft.id);
+      setStep1Completed(true);
 
       try {
         const summary = await fetchDraftSummary(draft.id);
@@ -701,7 +706,9 @@ export default function App() {
   const hasGeneratedScenarioAvailable = Boolean(
     scenarioPreviewData ?? draftSummary?.hasGeneratedScenario,
   );
-  const isStep2Enabled = Boolean(activeDraftId);
+  const isStep2Enabled = Boolean(
+    activeDraftId || step1Completed || designerJson.trim().length > 0,
+  );
   const isStep3Enabled = Boolean(activeDraftId);
   const isStep4Enabled = Boolean(activeDraftId && hasGeneratedScenarioAvailable);
 
@@ -724,6 +731,30 @@ export default function App() {
     isStep2Enabled,
     isStep3Enabled,
     isStep4Enabled,
+  ]);
+
+  useEffect(() => {
+    const hasDesignerJson = designerJson.trim().length > 0;
+
+    if (hasDesignerJson && !step1Completed) {
+      setStep1Completed(true);
+      setStep1Error(null);
+      if (activeWizardStep === 1) {
+        setActiveWizardStep(2);
+      }
+      if (!isDesignerOpen) {
+        setIsDesignerOpen(true);
+      }
+    }
+    if (!hasDesignerJson && step1Completed && !activeDraftId) {
+      setStep1Completed(false);
+    }
+  }, [
+    designerJson,
+    step1Completed,
+    activeWizardStep,
+    isDesignerOpen,
+    activeDraftId,
   ]);
 
   const wizardSteps = [
@@ -963,7 +994,7 @@ export default function App() {
                 placeholder="Pega o edita un escenario en formato JSON…"
                 className="w-full min-h-[160px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
               />
-              {designerSource ? (
+              {designerSource && designerSource.kind === "business" ? (
                 <p className="text-[10px] text-zinc-500">
                   precargado desde {designerSource.kind}: {designerSource.name}
                 </p>
