@@ -322,14 +322,20 @@ export default function App() {
     try {
       setDesignerError(null);
 
-      const response = await fetchScenarioDefinition(name);
-      const serialized = JSON.stringify(response.definition, null, 2);
+      const definition = await fetchScenarioDefinition(name);
+      const serialized = JSON.stringify(definition.definition, null, 2);
       setDesignerJson(serialized);
-      setDesignerSource({ kind: 'business', name: response.name });
+      setDesignerSource({ kind: 'business', name: definition.name });
       setIsDesignerOpen(true);
+      setActiveWizardStep(2);
     } catch (err) {
       console.warn("Failed to load scenario definition", err);
-      setDesignerError(`No se pudo cargar el escenario '${name}'.`);
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "not_found") {
+        setDesignerError(`El escenario '${name}' no existe.`);
+      } else {
+        setDesignerError(`No se pudo cargar el escenario '${name}'.`);
+      }
     }
   };
 
@@ -949,6 +955,25 @@ export default function App() {
             ) : null}
             <div className="space-y-2">
               <label className="uppercase text-[10px] text-zinc-500">
+                JSON del escenario
+              </label>
+              <textarea
+                value={designerJson}
+                onChange={handleDesignerJsonChange}
+                placeholder="Pega o edita un escenario en formato JSON…"
+                className="w-full min-h-[160px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
+              />
+              {designerSource ? (
+                <p className="text-[10px] text-zinc-500">
+                  precargado desde {designerSource.kind}: {designerSource.name}
+                </p>
+              ) : null}
+              {designerError ? (
+                <div className="text-[10px] text-red-400">{designerError}</div>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <label className="uppercase text-[10px] text-zinc-500">
                 Feedback de refinado
               </label>
               <textarea
@@ -1210,25 +1235,6 @@ export default function App() {
           id="new-scenario-panel"
           className="px-3 py-3 space-y-4 border-t border-zinc-800"
         >
-          <div className="space-y-2">
-            <label className="uppercase text-[10px] text-zinc-500">
-              JSON del escenario
-            </label>
-            <textarea
-              value={designerJson}
-              onChange={handleDesignerJsonChange}
-              placeholder="Pega o edita un escenario en formato JSON…"
-              className="w-full min-h-[160px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
-            />
-            {designerSource ? (
-              <p className="text-[10px] text-zinc-500">
-                precargado desde {designerSource.kind}: {designerSource.name}
-              </p>
-            ) : null}
-            {designerError ? (
-              <div className="text-[10px] text-red-400">{designerError}</div>
-            ) : null}
-          </div>
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {wizardSteps.map((step) => {
               const isActive = activeWizardStep === step.id;
