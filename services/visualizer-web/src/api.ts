@@ -100,6 +100,38 @@ export async function fetchScenarioDefinition(
   };
 }
 
+export async function validateScenario(scenario: any) {
+  const res = await fetch(`${API_BASE}/validate-scenario`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario }),
+  });
+
+  if (res.status === 200) {
+    return { ok: true, ...(await res.json()) };
+  }
+
+  if (res.status === 422) {
+    return { ok: false, ...(await res.json()) };
+  }
+
+  throw new Error(`validate-scenario HTTP ${res.status}`);
+}
+
+export async function applyScenario(scenario: any) {
+  const res = await fetch(`${API_BASE}/scenario`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scenario }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`apply-scenario HTTP ${res.status}`);
+  }
+
+  return res.json();
+}
+
 export async function fetchScenarioBootstrap(): Promise<ScenarioBootstrapResponse> {
   const res = await fetch(`${API_BASE}/scenario-bootstrap`);
 
