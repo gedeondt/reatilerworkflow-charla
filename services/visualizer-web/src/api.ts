@@ -1,3 +1,4 @@
+import type { Scenario } from "@reatiler/saga-kernel";
 import type {
   TraceView,
   LogEntry,
@@ -76,10 +77,14 @@ type ErrorWithStatus = Error & { status?: number };
 
 export async function fetchScenarioDefinition(
   name: string,
-): Promise<ScenarioDefinitionResponse> {
+): Promise<{ name: string; definition: Scenario }> {
   const res = await fetch(
     `${API_BASE}/scenarios/${encodeURIComponent(name)}/definition`,
   );
+
+  if (res.status === 404) {
+    throw new Error("not_found");
+  }
 
   if (!res.ok) {
     const error = new Error(await parseErrorResponse(res)) as ErrorWithStatus;
@@ -87,7 +92,12 @@ export async function fetchScenarioDefinition(
     throw error;
   }
 
-  return res.json();
+  const payload = (await res.json()) as ScenarioDefinitionResponse;
+
+  return {
+    name: payload.name,
+    definition: payload.definition as Scenario,
+  };
 }
 
 export async function fetchScenarioBootstrap(): Promise<ScenarioBootstrapResponse> {
