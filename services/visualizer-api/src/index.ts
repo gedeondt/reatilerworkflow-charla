@@ -303,8 +303,22 @@ const fetchDraftScenarioDefinition = async (
       });
     }
 
+    const rawDefinition = response.data;
+
+    if (
+      rawDefinition &&
+      typeof rawDefinition === 'object' &&
+      (Array.isArray((rawDefinition as Record<string, unknown>).events) ||
+        Array.isArray((rawDefinition as Record<string, unknown>).listeners))
+    ) {
+      throw new HttpError(502, {
+        error: 'invalid_scenario_definition',
+        message: 'Generated scenario JSON is invalid.',
+      });
+    }
+
     try {
-      return normalizeScenario(response.data);
+      return normalizeScenario(rawDefinition);
     } catch (error) {
       if (error instanceof z.ZodError) {
         throw new HttpError(502, {
@@ -569,6 +583,32 @@ app.get<{ Querystring: { name?: string } }>('/scenario-definition', async (reque
     }
 
     request.log.error({ err: error }, 'unexpected error loading business scenario definition');
+    return reply.status(500).send({
+      error: 'unexpected_error',
+      message: 'Failed to load scenario definition.',
+    });
+  }
+});
+
+app.get<{ Params: { name: string } }>('/scenarios/:name/definition', async (request, reply) => {
+  const { name } = request.params;
+
+  try {
+    const definition = await loadBusinessScenarioDefinition(name);
+    return reply.send({ name, definition });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      if (error.status === 404) {
+        return reply.status(404).send({
+          error: 'not_found',
+          message: `Scenario '${name}' not found`,
+        });
+      }
+
+      return reply.status(error.status).send(error.payload);
+    }
+
+    request.log.error({ err: error }, 'unexpected error loading scenario definition');
     return reply.status(500).send({
       error: 'unexpected_error',
       message: 'Failed to load scenario definition.',
