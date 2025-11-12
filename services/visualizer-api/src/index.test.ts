@@ -81,6 +81,38 @@ describe('GET /scenario', () => {
   });
 });
 
+describe('GET /scenarios/:name/definition', () => {
+  it('returns the normalized definition for a business scenario', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/scenarios/retailer-happy-path/definition',
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    const payload = response.json() as { name: string; definition: Scenario };
+
+    expect(payload.name).toBe('retailer-happy-path');
+    expect(payload.definition).toEqual(loadScenario('retailer-happy-path'));
+  });
+
+  it('returns 404 when the scenario is unknown', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/scenarios/does-not-exist/definition',
+    });
+
+    expect(response.statusCode).toBe(404);
+
+    const payload = response.json() as { error: string; message: string };
+
+    expect(payload).toEqual({
+      error: 'not_found',
+      message: "Scenario 'does-not-exist' not found",
+    });
+  });
+});
+
 describe('applyEventToState', () => {
   it('creates a new trace when none exists', async () => {
     mockedAxios.get.mockResolvedValueOnce({ status: 404 });

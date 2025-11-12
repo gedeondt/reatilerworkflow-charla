@@ -3,6 +3,7 @@ import type {
   LogEntry,
   ScenarioResponse,
   ScenariosResponse,
+  ScenarioDefinitionResponse,
   ApplyScenarioResponse,
   DraftSummary,
   MarkReadyResponse,
@@ -66,6 +67,24 @@ export async function fetchScenarios(): Promise<ScenariosResponse> {
   const res = await fetch(`${API_BASE}/scenarios`);
   if (!res.ok) {
     throw new Error(`Failed to fetch scenarios (${res.status})`);
+  }
+
+  return res.json();
+}
+
+type ErrorWithStatus = Error & { status?: number };
+
+export async function fetchScenarioDefinition(
+  name: string,
+): Promise<ScenarioDefinitionResponse> {
+  const res = await fetch(
+    `${API_BASE}/scenarios/${encodeURIComponent(name)}/definition`,
+  );
+
+  if (!res.ok) {
+    const error = new Error(await parseErrorResponse(res)) as ErrorWithStatus;
+    error.status = res.status;
+    throw error;
   }
 
   return res.json();

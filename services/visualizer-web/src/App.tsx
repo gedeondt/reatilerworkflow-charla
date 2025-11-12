@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  applyScenarioByName,
   applyScenarioDraft,
   createScenarioDraft,
   fetchDraftSummary,
   fetchLogs,
   fetchScenario,
+  fetchScenarioDefinition,
   fetchScenarioBootstrap,
   fetchScenarios,
   fetchTraces,
@@ -41,6 +41,7 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeScenario, setActiveScenario] = useState<string | null>(null);
+  const [selectedScenario, setSelectedScenario] = useState<string>("");
   const [availableScenarios, setAvailableScenarios] = useState<ScenarioListItem[]>([]);
   const [isSwitching, setIsSwitching] = useState<boolean>(false);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
@@ -60,7 +61,12 @@ export default function App() {
   const [createdDraft, setCreatedDraft] = useState<DraftCreationResponse | null>(
     null,
   );
-  const [isNewScenarioOpen, setIsNewScenarioOpen] = useState<boolean>(false);
+  const [isDesignerOpen, setIsDesignerOpen] = useState<boolean>(false);
+  const [designerJson, setDesignerJson] = useState<string>("");
+  const [designerSource, setDesignerSource] = useState<
+    { kind: 'business'; name: string } | null
+  >(null);
+  const [designerError, setDesignerError] = useState<string | null>(null);
   const [refinementFeedback, setRefinementFeedback] = useState<string>("");
   const [activeWizardStep, setActiveWizardStep] = useState<number>(1);
   const [step1Error, setStep1Error] = useState<string | null>(null);
@@ -306,50 +312,38 @@ export default function App() {
     event: React.ChangeEvent<HTMLSelectElement>,
   ) => {
     const name = event.target.value;
+    setSelectedScenario(name);
 
-    if (!name || name === activeScenario) {
+    if (!name) {
+      setDesignerError(null);
       return;
     }
 
-    setScenarioError(null);
-    setPendingScenario(name);
-    setIsSwitching(true);
-
     try {
-      const response = await applyScenarioByName(name);
-      setActiveScenario(response.name);
-      setActiveScenarioSource(response.source ?? "business");
-      setAvailableScenarios((prev) =>
-        upsertScenarioItem(prev, {
-          name: response.name,
-          source: response.source ?? "business",
-        })
-      );
+      setDesignerError(null);
 
-      try {
-        const refreshed = await fetchScenario();
-        setActiveScenario(refreshed.name);
-        setActiveScenarioSource(refreshed.source ?? "business");
-        setAvailableScenarios((prev) =>
-          upsertScenarioItem(prev, {
-            name: refreshed.name,
-            source: refreshed.source ?? "business",
-          })
-        );
-      } catch (refreshError) {
-        console.warn("Failed to refresh scenario after switching", refreshError);
-      }
-
-      setBootstrapHint(null);
-      const bootstrap = await readScenarioBootstrap();
-      setBootstrapHint(bootstrap);
+      const response = await fetchScenarioDefinition(name);
+      const serialized = JSON.stringify(response.definition, null, 2);
+      setDesignerJson(serialized);
+      setDesignerSource({ kind: 'business', name: response.name });
+      setIsDesignerOpen(true);
     } catch (err) {
-      console.warn("Failed to switch scenario", err);
-      setScenarioError(
-        err instanceof Error ? err.message : "failed to switch scenario",
-      );
-      setIsSwitching(false);
-      setPendingScenario(null);
+      console.warn("Failed to load scenario definition", err);
+      setDesignerError(`No se pudo cargar el escenario '${name}'.`);
+    }
+  };
+
+  const handleDesignerJsonChange = (
+    event: React.ChangeEvent<HTMLTextAreaElement>,
+  ) => {
+    setDesignerJson(event.target.value);
+
+    if (designerSource) {
+      setDesignerSource(null);
+    }
+
+    if (designerError) {
+      setDesignerError(null);
     }
   };
 
@@ -365,8 +359,8 @@ export default function App() {
     setDraftDescription(event.target.value);
   };
 
-  const toggleNewScenario = () => {
-    setIsNewScenarioOpen((prev) => !prev);
+  const toggleDesignerPanel = () => {
+    setIsDesignerOpen((prev) => !prev);
   };
 
   const resetWizard = useCallback(() => {
@@ -1169,14 +1163,14 @@ export default function App() {
         <span>[scenario:</span>
         <select
           aria-label="Select scenario"
-          value={activeScenario ?? ""}
+          value={selectedScenario}
           onChange={handleScenarioChange}
-          disabled={!activeScenario || scenarioOptions.length === 0 || isSwitching}
+          disabled={scenarioOptions.length === 0}
           className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 rounded"
         >
-          {!activeScenario ? (
-            <option value="">loading…</option>
-          ) : null}
+          <option value="">
+            {scenarioOptions.length === 0 ? 'loading…' : 'Elegir…'}
+          </option>
           {scenarioOptions.map((option) => (
             <option key={option.name} value={option.name}>
               {formatScenarioOption(option)}
@@ -1203,19 +1197,38 @@ export default function App() {
     <section className="w-full border-b border-zinc-800 bg-zinc-950 text-[11px] text-zinc-300">
       <button
         type="button"
-        onClick={toggleNewScenario}
-        aria-expanded={isNewScenarioOpen}
+        onClick={toggleDesignerPanel}
+        aria-expanded={isDesignerOpen}
         aria-controls="new-scenario-panel"
         className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-zinc-900 text-zinc-300 hover:bg-zinc-900/70"
       >
         <span>Nuevo escenario</span>
-        <span>{isNewScenarioOpen ? "[-]" : "[+]"}</span>
+        <span>{isDesignerOpen ? "[-]" : "[+]"}</span>
       </button>
-      {isNewScenarioOpen ? (
+      {isDesignerOpen ? (
         <div
           id="new-scenario-panel"
           className="px-3 py-3 space-y-4 border-t border-zinc-800"
         >
+          <div className="space-y-2">
+            <label className="uppercase text-[10px] text-zinc-500">
+              JSON del escenario
+            </label>
+            <textarea
+              value={designerJson}
+              onChange={handleDesignerJsonChange}
+              placeholder="Pega o edita un escenario en formato JSON…"
+              className="w-full min-h-[160px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
+            />
+            {designerSource ? (
+              <p className="text-[10px] text-zinc-500">
+                precargado desde {designerSource.kind}: {designerSource.name}
+              </p>
+            ) : null}
+            {designerError ? (
+              <div className="text-[10px] text-red-400">{designerError}</div>
+            ) : null}
+          </div>
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {wizardSteps.map((step) => {
               const isActive = activeWizardStep === step.id;

@@ -35,6 +35,11 @@ export type ScenariosResponse = {
   items: ScenarioListItem[];
 };
 
+export type ScenarioDefinitionResponse = {
+  name: string;
+  definition: Record<string, unknown>;
+};
+
 export type ApplyScenarioResponse = {
   name: string;
   status: 'active';
