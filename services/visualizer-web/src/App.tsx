@@ -22,6 +22,7 @@ import type {
   TraceView,
 } from "./types";
 import NewScenarioDiagram from "./NewScenarioDiagram";
+import { StepEditJson } from "./components/wizard/StepEditJson";
 
 type BootstrapHint = {
   queue: string;
@@ -313,20 +314,19 @@ export default function App() {
     event: React.ChangeEvent<HTMLSelectElement>,
   ) => {
     const name = event.target.value;
-    setSelectedScenario(name);
 
     if (!name) {
-      setDesignerError(null);
       return;
     }
+
+    setSelectedScenario(name);
 
     try {
       setDesignerError(null);
 
-      const definition = await fetchScenarioDefinition(name);
-      const serialized = JSON.stringify(definition.definition, null, 2);
-      setDesignerJson(serialized);
-      setDesignerSource({ kind: "business", name: definition.name });
+      const { definition } = await fetchScenarioDefinition(name);
+      setDesignerJson(JSON.stringify(definition, null, 2));
+      setDesignerSource({ kind: "business", name });
       setIsDesignerOpen(true);
       setStep1Completed(true);
       setStep1Error(null);
@@ -342,10 +342,8 @@ export default function App() {
     }
   };
 
-  const handleDesignerJsonChange = (
-    event: React.ChangeEvent<HTMLTextAreaElement>,
-  ) => {
-    setDesignerJson(event.target.value);
+  const handleDesignerJsonChange = (value: string) => {
+    setDesignerJson(value);
 
     if (designerSource) {
       setDesignerSource(null);
@@ -984,25 +982,16 @@ export default function App() {
             {step2Message ? (
               <div className="text-green-400 text-[10px]">{step2Message}</div>
             ) : null}
-            <div className="space-y-2">
-              <label className="uppercase text-[10px] text-zinc-500">
-                JSON del escenario
-              </label>
-              <textarea
-                value={designerJson}
-                onChange={handleDesignerJsonChange}
-                placeholder="Pega o edita un escenario en formato JSON…"
-                className="w-full min-h-[160px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-green-600"
-              />
-              {designerSource && designerSource.kind === "business" ? (
-                <p className="text-[10px] text-zinc-500">
-                  precargado desde {designerSource.kind}: {designerSource.name}
-                </p>
-              ) : null}
-              {designerError ? (
-                <div className="text-[10px] text-red-400">{designerError}</div>
-              ) : null}
-            </div>
+            <StepEditJson
+              designerJson={designerJson}
+              onDesignerJsonChange={handleDesignerJsonChange}
+              designerSource={designerSource}
+              setWizardStep={setActiveWizardStep}
+              setIsDesignerOpen={setIsDesignerOpen}
+            />
+            {designerError ? (
+              <div className="text-[10px] text-red-400">{designerError}</div>
+            ) : null}
             <div className="space-y-2">
               <label className="uppercase text-[10px] text-zinc-500">
                 Feedback de refinado

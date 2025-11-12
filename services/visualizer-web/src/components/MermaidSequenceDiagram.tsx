@@ -1,31 +1,27 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import mermaid from "mermaid";
 
-const mermaidConfig = {
-  startOnLoad: false,
-  theme: "dark",
-  securityLevel: "strict" as const,
-  themeVariables: {
-    primaryColor: "#111827",
-    primaryBorderColor: "#22c55e",
-    primaryTextColor: "#e2e8f0",
-    lineColor: "#22c55e",
-    actorTextColor: "#cbd5f5",
-    noteBkgColor: "#1f2937",
-    noteTextColor: "#f9fafb",
-  },
-};
+let _mermaidInited = false;
 
-let initialized = false;
-
-const initializeMermaid = () => {
-  if (!initialized) {
-    mermaid.initialize(mermaidConfig);
-    initialized = true;
+function ensureMermaid() {
+  if (!_mermaidInited) {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "loose",
+      theme: "dark",
+      themeVariables: {
+        primaryColor: "#111827",
+        primaryBorderColor: "#22c55e",
+        primaryTextColor: "#e2e8f0",
+        lineColor: "#22c55e",
+        actorTextColor: "#cbd5f5",
+        noteBkgColor: "#1f2937",
+        noteTextColor: "#f9fafb",
+      },
+    });
+    _mermaidInited = true;
   }
-};
-
-const generateId = () => `mermaid-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 type MermaidSequenceDiagramProps = {
   definition: string;
@@ -34,56 +30,47 @@ type MermaidSequenceDiagramProps = {
 export const MermaidSequenceDiagram: React.FC<MermaidSequenceDiagramProps> = ({
   definition,
 }) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [html, setHtml] = useState<string>("");
   const [renderError, setRenderError] = useState<string | null>(null);
-  const renderId = useMemo(() => generateId(), []);
 
   useEffect(() => {
-    initializeMermaid();
-  }, []);
+    setRenderError(null);
+    setHtml("");
 
-  useEffect(() => {
-    const container = containerRef.current;
-
-    if (!container) {
+    if (!definition?.trim()) {
       return;
     }
 
-    let isMounted = true;
-    container.innerHTML = "";
-    setRenderError(null);
+    try {
+      ensureMermaid();
+      const id = `mmd-${Date.now()}`;
 
-    const renderDiagram = async () => {
-      try {
-        const { svg } = await mermaid.render(renderId, definition);
-
-        if (isMounted && containerRef.current) {
-          containerRef.current.innerHTML = svg;
-        }
-      } catch (error) {
-        console.error("Failed to render Mermaid diagram", error);
-        if (isMounted) {
+      mermaid
+        .render(id, definition)
+        .then(({ svg }) => {
+          setHtml(svg);
+        })
+        .catch((error) => {
           setRenderError(
             "No se pudo renderizar el diagrama de secuencia. Revisa el escenario generado.",
           );
-        }
-      }
-    };
-
-    void renderDiagram();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [definition, renderId]);
+          console.error("Failed to render Mermaid diagram", error);
+        });
+    } catch (e) {
+      setRenderError(String(e));
+    }
+  }, [definition]);
 
   return (
     <div className="space-y-2">
-      <div className="h-80 w-full overflow-auto border border-zinc-800 rounded bg-zinc-950/80 p-2">
+      <div className="w-full overflow-auto border border-zinc-800 rounded bg-zinc-950/80 p-2 min-h-[20rem]">
         {renderError ? (
           <div className="text-red-400 text-[11px]">{renderError}</div>
         ) : (
-          <div ref={containerRef} className="min-h-full" />
+          <div
+            className="min-h-full"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
         )}
       </div>
     </div>

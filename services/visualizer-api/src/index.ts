@@ -80,10 +80,14 @@ const SCENARIO_DESIGNER_BASE =
 
 type ScenarioSource = 'business' | 'draft';
 
+type DynamicScenarioOrigin =
+  | { type: 'draft'; draftId: string }
+  | { type: 'designer' };
+
 type DynamicScenarioRecord = {
   name: string;
   definition: Scenario;
-  origin: { type: 'draft'; draftId: string };
+  origin: DynamicScenarioOrigin;
   appliedAt: string;
   bootstrapExample?: ScenarioBootstrapExample;
 };
@@ -123,6 +127,45 @@ const registerDynamicScenario = (record: DynamicScenarioRecord) => {
 const listDynamicScenarios = () => Array.from(dynamicScenarios.values());
 
 const clearDynamicScenarios = () => dynamicScenarios.clear();
+
+const summarizeScenarioDefinition = (definition: Scenario) => {
+  const domains = Array.isArray(definition.domains) ? definition.domains : [];
+
+  const domainsCount = domains.length;
+  const eventsCount = domains.reduce((total, domain) => {
+    const events = Array.isArray(domain.events) ? domain.events : [];
+    return total + events.length;
+  }, 0);
+  const listenersCount = domains.reduce((total, domain) => {
+    const listeners = Array.isArray(domain.listeners) ? domain.listeners : [];
+    return total + listeners.length;
+  }, 0);
+
+  return { domainsCount, eventsCount, listenersCount };
+};
+
+const validateScenarioDefinition = (input: unknown) => {
+  try {
+    const normalized = normalizeScenario(input);
+    return {
+      ok: true as const,
+      scenario: normalized,
+      summary: summarizeScenarioDefinition(normalized),
+    };
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return {
+        ok: false as const,
+        errors: error.issues.map((issue) => issue.message),
+      };
+    }
+
+    return {
+      ok: false as const,
+      errors: [error instanceof Error ? error.message : 'Unknown validation error'],
+    };
+  }
+};
 
 const listScenarioItems = async (): Promise<
   Array<{ name: string; source: ScenarioSource }>
@@ -711,40 +754,85 @@ app.post('/scenario/apply', async (request, reply) => {
   }
 });
 
-app.post<{ Body: { name?: unknown } }>('/scenario', async (request, reply) => {
-  const { name } = request.body ?? {};
+app.post<{ Body: { scenario?: unknown } }>('/validate-scenario', async (request, reply) => {
+  const { scenario } = request.body ?? {};
 
-  if (typeof name !== 'string' || name.length === 0) {
-    return reply
-      .status(400)
-      .send({ error: 'Request body must include a scenario name.' });
+  const result = validateScenarioDefinition(scenario);
+
+  if (!result.ok) {
+    return reply.status(422).send({ ok: false, errors: result.errors });
   }
 
-  try {
-    const source = await ensureScenarioExists(name);
-
-    if (source === 'draft') {
-      const record = dynamicScenarios.get(name);
-
-      if (record) {
-        registerDynamicScenario({ ...record, appliedAt: new Date().toISOString() });
-      }
-    }
-
-    setActiveScenario(name, source);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      return reply.status(error.status).send(error.payload);
-    }
-
-    app.log.error({ err: error }, 'failed to validate scenario before switch');
-    return reply
-      .status(500)
-      .send({ error: 'Unable to validate requested scenario.' });
-  }
-
-  return reply.send({ name });
+  return reply.send({ ok: true, scenario: result.scenario, summary: result.summary });
 });
+
+app.post<{ Body: { name?: unknown; scenario?: unknown } }>(
+  '/scenario',
+  async (request, reply) => {
+    const { name, scenario } = request.body ?? {};
+
+    if (typeof scenario !== 'undefined') {
+      const result = validateScenarioDefinition(scenario);
+
+      if (!result.ok) {
+        return reply.status(422).send({ ok: false, errors: result.errors });
+      }
+
+      const normalized = result.scenario;
+      const scenarioName =
+        (typeof normalized.name === 'string' && normalized.name.length > 0
+          ? normalized.name
+          : null) ||
+        (typeof name === 'string' && name.length > 0 ? name : `designer-${Date.now()}`);
+
+      registerDynamicScenario({
+        name: scenarioName,
+        definition: normalized,
+        origin: { type: 'designer' },
+        appliedAt: new Date().toISOString(),
+      });
+
+      setActiveScenario(scenarioName, 'draft');
+
+      return reply.send({
+        ok: true,
+        name: scenarioName,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    if (typeof name !== 'string' || name.length === 0) {
+      return reply
+        .status(400)
+        .send({ error: 'Request body must include a scenario name.' });
+    }
+
+    try {
+      const source = await ensureScenarioExists(name);
+
+      if (source === 'draft') {
+        const record = dynamicScenarios.get(name);
+
+        if (record) {
+          registerDynamicScenario({ ...record, appliedAt: new Date().toISOString() });
+        }
+      }
+
+      setActiveScenario(name, source);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return reply.status(error.status).send(error.payload);
+      }
+
+      app.log.error({ err: error }, 'failed to validate scenario before switch');
+      return reply
+        .status(500)
+        .send({ error: 'Unable to validate requested scenario.' });
+    }
+
+    return reply.send({ name });
+  },
+);
 
 app.get('/traces', async (_request, reply) => {
   try {
