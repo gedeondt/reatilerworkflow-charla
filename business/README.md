@@ -27,7 +27,7 @@ Cada evento debe declarar explícitamente la forma de su payload mediante `paylo
 Reglas clave:
 
 - Tipos primitivos permitidos: `string`, `number`, `boolean`.
-- Arrays permitidos: `string[]`, `number[]`, `boolean[]` o arrays de objetos planos.
+- Arrays permitidos: únicamente arrays de objetos planos descritos con un solo objeto de ejemplo ("campo": [ { ... } ]). No se permiten sufijos escalares como `string[]`.
 - Objetos planos: un único nivel de propiedades cuyos valores sean tipos primitivos o arrays primitivos.
 - Arrays de objetos: describen un arreglo homogéneo de objetos planos. No se admiten arrays de arrays ni objetos anidados en más de un nivel.
 - Eventos sin datos: deben declarar `payloadSchema: {}`.
@@ -73,8 +73,7 @@ Reglas clave:
 
 - Campos escalares: alias directo (`"campo": "campoOrigen"`), `{ "from": "campo" }` o constantes `{ "const": valor }`.
 - Objetos planos: `{ "map": { ... } }` con opcional `objectFrom` para señalar el origen.
-- Arrays de objetos planos: `{ "arrayFrom": "campoArray", "map": { ... } }`.
-- Arrays de primitivos: solo admiten `from` o alias directo; no se permiten constantes.
+- Arrays de objetos planos: `{ "arrayFrom": "campoArray", "map": { ... } }`. Todos los arrays deben declararse como colecciones de objetos planos en el `payloadSchema` destino.
 - Las constantes solo se aplican a campos escalares, incluidos los que viven dentro de objetos o arrays de objetos.
 
 El escenario `retailer-happy-path` muestra cómo propagar identificadores, importes y direcciones con estas reglas en cada salto de la SAGA.【F:business/retailer-happy-path.json†L94-L220】【F:packages/saga-kernel/src/mapping.ts†L1-L220】

@@ -17,7 +17,7 @@ Puedes añadir dominios adicionales según el flujo que quieras simular, siempre
 
 ## Contrato de eventos (`payloadSchema`)
 
-Cada evento incluye `payloadSchema`, que funciona como contrato de datos entre dominios. Admite tipos primitivos (`string`, `number`, `boolean`), arrays de primitivos (`string[]`, `number[]`, `boolean[]`), objetos planos de un solo nivel y arrays de objetos planos. No se permiten anidaciones adicionales ni arrays de arrays. Si un evento no requiere datos, se define `payloadSchema: {}`.【F:business/retailer-happy-path.json†L10-L92】【F:packages/saga-kernel/src/schema.ts†L1-L128】
+Cada evento incluye `payloadSchema`, que funciona como contrato de datos entre dominios. Admite tipos primitivos (`string`, `number`, `boolean`), objetos planos de un solo nivel y arrays de objetos planos definidos como un array literal con un único objeto ejemplo. No se permiten anidaciones adicionales, arrays de arrays ni sufijos escalares como `string[]`: cualquier colección debe describirse como un array de objetos planos. Si un evento no requiere datos, se define `payloadSchema: {}`.【F:business/retailer-happy-path.json†L10-L92】【F:packages/saga-kernel/src/schema.ts†L1-L260】
 
 En el escenario base, `OrderPlaced` describe identificadores, monto, dirección y líneas del pedido mediante `payloadSchema`, mientras que `OrderConfirmed` solo necesita el identificador y el estado final.【F:business/retailer-happy-path.json†L12-L91】
 
@@ -29,8 +29,7 @@ Reglas principales:
 
 - **Escalares** (`string`, `number`, `boolean`): usa alias directo (`"campoDestino": "campoOrigen"`), `{ "from": "campo" }` o constantes `{ "const": valor }`.
 - **Objetos planos**: declara `{ "map": { ... } }` y, si el origen está anidado, añade `objectFrom` para indicar el objeto origen.
-- **Arrays de objetos planos**: usa `{ "arrayFrom": "campoArray", "map": { ... } }` para transformar cada elemento.
-- **Arrays de primitivos** (`string[]`, `number[]`, `boolean[]`): mapea directamente con `from` o alias. No se permiten constantes en este caso.【F:packages/saga-kernel/src/schema.ts†L56-L260】【F:packages/saga-kernel/src/mapping.ts†L1-L220】
+- **Arrays de objetos planos**: usa `{ "arrayFrom": "campoArray", "map": { ... } }` para transformar cada elemento. Todos los arrays se describen como colecciones de objetos planos con un único objeto de referencia en `payloadSchema`.【F:packages/saga-kernel/src/schema.ts†L56-L360】【F:packages/saga-kernel/src/mapping.ts†L1-L220】
 - Los mapeos pueden mezclar valores propagados y constantes, pero no admiten lógica condicional ni transformaciones complejas.
 
 Ejemplo simplificado:

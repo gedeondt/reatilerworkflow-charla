@@ -222,7 +222,27 @@ describe('scenarioSchema', () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((issue) => issue.message);
-      expect(messages).toContain('Invalid input');
+      expect(messages).toContain('Expected string, received object');
+    }
+  });
+
+  it('rejects payload schemas using scalar array syntax', () => {
+    const invalidPayload = JSON.parse(JSON.stringify(createBaseScenario())) as Scenario;
+    if (invalidPayload.domains[0].events?.[0]) {
+      invalidPayload.domains[0].events[0].payloadSchema = {
+        orderId: 'string',
+        categorias: 'string[]'
+      };
+    }
+
+    const result = scenarioSchema.safeParse(invalidPayload);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const messages = result.error.issues.map((issue) => issue.message);
+      expect(messages).toContain(
+        'Scalar array types like "string[]" are not supported; use array of objects instead.'
+      );
     }
   });
 
