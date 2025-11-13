@@ -508,12 +508,14 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
     setJsonError(null);
 
     try {
-      const { scenario } = await generateDraftJson(draftId);
-      if (!scenario) {
+      const { generatedScenario, scenario } = await generateDraftJson(draftId);
+      const scenarioPayload = generatedScenario?.content ?? generatedScenario ?? scenario;
+
+      if (!scenarioPayload) {
         throw new Error("Respuesta sin escenario generado");
       }
 
-      const json = JSON.stringify(scenario, null, 2);
+      const json = JSON.stringify(scenarioPayload, null, 2);
       updateState((prev) => ({
         ...prev,
         designerJson: json,

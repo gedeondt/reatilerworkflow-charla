@@ -73,6 +73,15 @@ export type ScenarioProposal = {
   openQuestions: string[];
 };
 
+export type GeneratedScenario = {
+  content: Record<string, unknown>;
+  createdAt: string;
+  bootstrapExample?: {
+    queue: string;
+    event: Record<string, unknown>;
+  };
+};
+
 export type DraftCreationResponse = {
   id: string;
   inputDescription: string;
@@ -84,18 +93,15 @@ export type DraftCreationResponse = {
     modelNote: string;
     timestamp: string;
   }>;
-  generatedScenario?: {
-    content: Record<string, unknown>;
-    createdAt: string;
-    bootstrapExample?: {
-      queue: string;
-      event: Record<string, unknown>;
-    };
-  };
+  generatedScenario?: GeneratedScenario;
 };
 
 export type GenerateJsonResponse = {
-  scenario: Record<string, unknown>;
+  id: string;
+  status: 'generated' | 'draft' | 'ready';
+  generatedScenario?: GeneratedScenario;
+  // Legacy shape kept for compatibility with older designer versions
+  scenario?: Record<string, unknown>;
   bootstrapExample?: {
     queue: string;
     event: Record<string, unknown>;
