@@ -45,11 +45,12 @@ Event:
 PayloadSchema permitido:
 - Objeto plano. Cada propiedad se define como uno de estos valores literales:
   * "string" | "number" | "boolean"
-  * "string[]" | "number[]" | "boolean[]"
+  * Un objeto plano (sin arrays) que describa campos anidados sencillos.
   * Un array con un ÚNICO objeto plano que describe la forma de los ítems. Ejemplo:
     "items": [ { "sku": "string", "cantidad": "number" } ]
-- No se permiten objetos anidados arbitrarios fuera de los arrays descritos.
-- No se permiten arrays de arrays ni claves especiales como fields/payload.
+- No se permiten sufijos escalares como "string[]", "number[]" o "boolean[]": todos los arrays deben representarse como arrays de objetos planos con un único ejemplo.
+- No se permiten objetos anidados arbitrarios fuera de los arrays descritos ni arrays de arrays.
+- No se permiten claves especiales como fields/payload.
 
 Listener:
 {
@@ -76,14 +77,8 @@ Reglas críticas para Mapping:
         - "campoDestino": "campoOrigen"
         - "campoDestino": { "from": "campoOrigen" }
         - "campoDestino": { "const": <valor escalar compatible> }
-    - Si el tipo es "string[]", "number[]" o "boolean[]":
-      - Mapping permitido ÚNICAMENTE:
-        - "campoDestino": "campoOrigen" cuando el evento de entrada tenga un campo array del mismo tipo,
-        - "campoDestino": { "from": "campoOrigen" } bajo esa misma condición.
-      - PROHIBIDO:
-        - { "const": [ ... ] }
-        - Objetos con arrayFrom, map, objectFrom u otras estructuras.
-      - Si no existe un campo array compatible, no inventes el mapping: rediseña el escenario para que el array exista en el evento de entrada antes de emitir.
+    - Si el tipo es un objeto plano:
+      - Usa { "map": { ... } } con opcional "objectFrom" para señalar el origen.
     - Para arrays de objetos (payloadSchema con "items": [ { ... } ]):
       - Se mantiene permitido:
         - "campoArrayDestino": { "arrayFrom": "campoArrayOrigen", "map": { ... } } solo en ese caso concreto.
@@ -92,7 +87,7 @@ Reglas críticas para Mapping:
     - El tipo construido por mapping debe coincidir EXACTAMENTE con el tipo del payloadSchema destino.
     - Si no tienes un origen razonable para arrays de primitivos, rediseña el flujo para obtenerlo.
     - No referencies campos que no existan en el evento de entrada.
-    - No uses { "const": [ ... ] } ni arrayFrom para campos cuyo tipo en el payloadSchema sea "string[]", "number[]" o "boolean[]".
+    - No inventes arrays escalares ni uses sufijos "[]": cuando necesites un array, defínelo como array de objetos y mapea con arrayFrom + map.
 - No declares campos en mapping que no existan en el payloadSchema destino.
 
 Prohibido:
@@ -116,9 +111,8 @@ Recuerda:
 - Mantén los nombres de los eventos únicos y reutilízalos cuando otros dominios deban reaccionar.
 
 Cuando generes mappings:
-- Para campos 'string[]', 'number[]' o 'boolean[]' del evento destino, SOLO puedes usar un campo array existente del evento de entrada ("campoDestino": "campoOrigen" o { 'from': 'campoOrigen' }).
-- No uses { 'const': [ ... ] } ni 'arrayFrom' ni estructuras complejas para estos campos.
-- Si no hay un campo array adecuado en el evento de entrada, rediseña el flujo de eventos para introducir ese dato antes de emitir.
+- No inventes arrays escalares ni uses sufijos "[]". Cuando el destino tenga un array, debe estar descrito como array de objetos y debes usar { "arrayFrom": "...", "map": { ... } }.
+- Si no hay un campo array adecuado en el evento de entrada, rediseña el flujo de eventos para introducirlo antes de emitir.
 - Utiliza 'arrayFrom' + 'map' únicamente cuando el payloadSchema destino defina un array de objetos ("items": [ { ... } ]).
 - No inventes otras estructuras ni incluyas campos no definidos en el payloadSchema destino.
 - No referencies campos inexistentes del evento origen; emplea { 'const': ... } solo para campos escalares cuando sea necesario.
@@ -171,12 +165,12 @@ ${scenarioDslRules}
   Errores detectados:
   ${errorsList}
 
-  Corrige especialmente los mappings de campos 'string[]'/'number[]'/'boolean[]': deben mapearse solo desde arrays existentes del evento de entrada ("campoDestino": "campoOrigen" o { "from": "campoOrigen" }), sin usar { "const": [ ... ] } ni 'arrayFrom'. Si falta ese origen, rediseña el flujo para incorporarlo antes de emitir.
+  Corrige especialmente cualquier campo array: todos deben representarse como arrays de objetos y mapearse con { "arrayFrom": "...", "map": { ... } } desde un array existente del evento de entrada. Si falta ese origen, rediseña el flujo para incorporarlo antes de emitir.
 
   Recuerda:
   - Revisa la descripción inicial y la propuesta refinada.
   - Ajusta el JSON para corregir los errores sin introducir claves nuevas.
-  - Al construir "mapping" en una acción "emit", respeta las reglas descritas: escalares con referencias directas o { "const": ... }, arrays de primitivos solo con referencias directas a arrays existentes y arrays de objetos con { "arrayFrom": ..., "map": { ... } }.
+  - Al construir "mapping" en una acción "emit", respeta las reglas descritas: escalares con referencias directas o { "const": ... }, objetos con { "map": { ... } } y arrays de objetos con { "arrayFrom": ..., "map": { ... } }.
   - Devuelve SOLO el JSON corregido que cumpla exactamente el DSL; no añadas texto adicional.
 
 Descripción inicial:

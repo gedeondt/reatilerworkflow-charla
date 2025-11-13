@@ -62,12 +62,6 @@ const matchesPrimitiveType = (value: unknown, type: PayloadPrimitive): boolean =
       return typeof value === 'number';
     case 'boolean':
       return typeof value === 'boolean';
-    case 'string[]':
-      return Array.isArray(value) && value.every((item) => typeof item === 'string');
-    case 'number[]':
-      return Array.isArray(value) && value.every((item) => typeof item === 'number');
-    case 'boolean[]':
-      return Array.isArray(value) && value.every((item) => typeof item === 'boolean');
     default:
       return false;
   }
@@ -330,11 +324,6 @@ export const applyEmitMapping = ({
           message: `Field "${fieldName}" must use array mapping`,
           path: fieldName
         });
-        return;
-      }
-
-      if (fieldSchema.length === 0) {
-        result[fieldName] = [];
         return;
       }
 
