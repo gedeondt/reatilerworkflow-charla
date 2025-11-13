@@ -11,6 +11,17 @@ export type InspectScenarioContractResult =
   | { ok: true; scenario: ScenarioContract }
   | { ok: false; failure: InspectScenarioContractFailure };
 
+export const unwrapScenarioPayload = (value: unknown): unknown => {
+  if (value && typeof value === 'object' && 'content' in (value as Record<string, unknown>)) {
+    const content = (value as Record<string, unknown>).content;
+    if (typeof content !== 'undefined') {
+      return content;
+    }
+  }
+
+  return value;
+};
+
 export function inspectScenarioContract(raw: string | unknown): InspectScenarioContractResult {
   let value: unknown = raw;
 
@@ -28,8 +39,10 @@ export function inspectScenarioContract(raw: string | unknown): InspectScenarioC
     }
   }
 
+  const scenarioPayload = unwrapScenarioPayload(value);
+
   try {
-    const scenario = normalizeScenario(value);
+    const scenario = normalizeScenario(scenarioPayload);
 
     return { ok: true, scenario };
   } catch (error) {
