@@ -174,7 +174,8 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
       }));
 
       try {
-        const result = await validateScenario(parsed.scenario.generatedScenario);
+        console.log("EHOOOO",parsed);
+        const result = await validateScenario(parsed);
         if (validationRequest.current !== requestId) {
           return;
         }
