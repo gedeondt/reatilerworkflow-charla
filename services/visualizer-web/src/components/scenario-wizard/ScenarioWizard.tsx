@@ -13,6 +13,7 @@ import {
   applyScenario,
   createScenarioDraft,
   fetchDraftSummary,
+  fetchScenarioDraftJsonPrompt,
   generateDraftJson,
   refineScenarioDraft,
   validateScenario,
@@ -49,6 +50,9 @@ export type ScenarioWizardState = {
   curlSnippet: string;
   draftId: string | null;
   draftSummary: DraftSummary | null;
+  jsonPrompt: string;
+  jsonPromptError: string | null;
+  isFetchingJsonPrompt: boolean;
 };
 
 type ScenarioWizardProps = {
@@ -74,6 +78,9 @@ export const defaultScenarioWizardState: ScenarioWizardState = {
   curlSnippet: "",
   draftId: null,
   draftSummary: null,
+  jsonPrompt: "",
+  jsonPromptError: null,
+  isFetchingJsonPrompt: false,
 };
 
 const toast = {
@@ -350,6 +357,9 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
       curlSnippet: "",
       draftId: null,
       draftSummary: null,
+      jsonPrompt: "",
+      jsonPromptError: null,
+      isFetchingJsonPrompt: false,
     });
   }, [updateState]);
 
@@ -388,6 +398,9 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
         draftId,
         draftSummary: summary,
         designerSource: { kind: "manual" },
+        jsonPrompt: "",
+        jsonPromptError: null,
+        isFetchingJsonPrompt: false,
       }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -405,6 +418,9 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
       validation: { ...initialValidation },
       mermaidCode: "",
       curlSnippet: "",
+      jsonPrompt: "",
+      jsonPromptError: null,
+      isFetchingJsonPrompt: false,
       wizardStep: 2,
     }));
   }, [updateState]);
@@ -512,6 +528,41 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
     }
   }, [updateState]);
 
+  const handleFetchJsonPrompt = useCallback(async () => {
+    const draftId = stateRef.current.draftId;
+
+    if (!draftId) {
+      updateState((prev) => ({
+        ...prev,
+        jsonPromptError: "No hay un borrador activo para generar el prompt.",
+      }));
+      return;
+    }
+
+    updateState((prev) => ({
+      ...prev,
+      isFetchingJsonPrompt: true,
+      jsonPromptError: null,
+    }));
+
+    try {
+      const payload = await fetchScenarioDraftJsonPrompt(draftId);
+      updateState((prev) => ({
+        ...prev,
+        jsonPrompt: payload.prompt ?? "",
+        isFetchingJsonPrompt: false,
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      updateState((prev) => ({
+        ...prev,
+        jsonPrompt: "",
+        jsonPromptError: `No se pudo generar el prompt: ${message}`,
+        isFetchingJsonPrompt: false,
+      }));
+    }
+  }, [updateState]);
+
   const canContinueFromDescription = Boolean(state.draftId && state.draftSummary);
 
   const stepContent = useMemo(() => {
@@ -543,6 +594,11 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
             canGenerateFromDraft={Boolean(state.draftId)}
             isGeneratingFromDraft={isGeneratingJson}
             generationError={jsonError}
+            onGeneratePrompt={handleFetchJsonPrompt}
+            canGeneratePrompt={Boolean(state.draftId)}
+            isGeneratingPrompt={state.isFetchingJsonPrompt}
+            promptText={state.jsonPrompt}
+            promptError={state.jsonPromptError}
           />
         );
       case 3:
@@ -573,6 +629,7 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
     handleDesignerJsonChange,
     handleGenerateIdea,
     handleGenerateJson,
+    handleFetchJsonPrompt,
     handleNext,
     handleValidateNow,
     ideaError,
@@ -586,6 +643,9 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
     state.designerSource,
     state.draftId,
     state.draftSummary,
+    state.isFetchingJsonPrompt,
+    state.jsonPrompt,
+    state.jsonPromptError,
     state.mermaidCode,
     state.validation,
     state.wizardStep,
