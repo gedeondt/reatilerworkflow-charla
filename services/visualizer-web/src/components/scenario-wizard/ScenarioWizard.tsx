@@ -8,7 +8,15 @@ import React, {
 
 import type { Scenario } from "@reatiler/saga-kernel";
 
-import { applyScenario, validateScenario } from "../../api";
+import type { DraftSummary } from "../../types";
+import {
+  applyScenario,
+  createScenarioDraft,
+  fetchDraftSummary,
+  generateDraftJson,
+  refineScenarioDraft,
+  validateScenario,
+} from "../../api";
 import { buildCurl, buildMermaid } from "../../lib/scenarioFormatting";
 import { StepCurl } from "./StepCurl";
 import { StepDescribe } from "./StepDescribe";
@@ -27,9 +35,11 @@ type DesignerSource =
   | { kind: "business"; name: string }
   | { kind: "manual" };
 
+type WizardStep = 1 | 2 | 3 | 4;
+
 export type ScenarioWizardState = {
-  wizardStep: 1 | 2 | 3 | 4 | 5;
-  isOpen: boolean;
+  wizardStep: WizardStep;
+  isCollapsed: boolean;
   selectedScenario: string;
   designerSource: DesignerSource;
   descriptionText: string;
@@ -37,6 +47,8 @@ export type ScenarioWizardState = {
   validation: ValidationState;
   mermaidCode: string;
   curlSnippet: string;
+  draftId: string | null;
+  draftSummary: DraftSummary | null;
 };
 
 type ScenarioWizardProps = {
@@ -52,7 +64,7 @@ const initialValidation: ValidationState = {
 
 export const defaultScenarioWizardState: ScenarioWizardState = {
   wizardStep: 1,
-  isOpen: false,
+  isCollapsed: true,
   selectedScenario: "",
   designerSource: null,
   descriptionText: "",
@@ -60,6 +72,8 @@ export const defaultScenarioWizardState: ScenarioWizardState = {
   validation: { ...initialValidation },
   mermaidCode: "",
   curlSnippet: "",
+  draftId: null,
+  draftSummary: null,
 };
 
 const toast = {
@@ -79,48 +93,16 @@ const toast = {
   },
 };
 
-function createScenarioSkeleton(description: string): Scenario {
-  const fallbackName = "manual-scenario";
-  const normalizedName = description
-    .trim()
-    .split(/\s+/)
-    .slice(0, 5)
-    .join("-")
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, "");
-
-  const scenarioName = normalizedName.length > 3 ? normalizedName : fallbackName;
-
-  return {
-    name: scenarioName,
-    version: 1,
-    domains: [
-      {
-        id: "orchestrator",
-        queue: "orchestrator",
-        events: [
-          {
-            name: "InitialEvent",
-            payloadSchema: {
-              type: "object",
-              properties: {
-                exampleId: { type: "string" },
-              },
-              required: ["exampleId"],
-            },
-          },
-        ],
-        listeners: [],
-      },
-    ],
-  };
-}
-
 export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardProps) {
   const [isApplying, setIsApplying] = useState(false);
+  const [isGeneratingIdea, setIsGeneratingIdea] = useState(false);
+  const [ideaError, setIdeaError] = useState<string | null>(null);
+  const [isGeneratingJson, setIsGeneratingJson] = useState(false);
+  const [jsonError, setJsonError] = useState<string | null>(null);
   const debounceHandle = useRef<number | null>(null);
   const validationRequest = useRef(0);
   const stateRef = useRef(state);
+  const isSyncingBusinessDraft = useRef(false);
 
   useEffect(() => {
     stateRef.current = state;
@@ -195,8 +177,8 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
           updateState((prev) => {
             const nextStep =
               prev.designerSource && prev.designerSource.kind === "business" &&
-              prev.wizardStep <= 3
-                ? 4
+              prev.wizardStep <= 2
+                ? 3
                 : prev.wizardStep;
 
             return {
@@ -264,31 +246,101 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
     };
   }, [state.designerJson, runValidation, resetValidation]);
 
-  const handleToggleOpen = useCallback(() => {
+  useEffect(() => {
+    setJsonError(null);
+  }, [state.designerSource]);
+
+  useEffect(() => {
+    if (
+      state.designerSource?.kind !== "business" ||
+      state.draftId ||
+      !state.designerJson.trim() ||
+      isSyncingBusinessDraft.current
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    isSyncingBusinessDraft.current = true;
+    const description = state.designerSource.name
+      ? `Escenario existente importado: ${state.designerSource.name}`
+      : "Escenario existente importado desde catálogo";
+    const jsonSnapshot = state.designerJson;
+
+    const syncDraft = async () => {
+      try {
+        const draft = await createScenarioDraft(description);
+        if (cancelled) {
+          return;
+        }
+
+        updateState((prev) => ({
+          ...prev,
+          draftId: draft.id,
+          draftSummary: null,
+        }));
+
+        if (jsonSnapshot.trim()) {
+          try {
+            await refineScenarioDraft(
+              draft.id,
+              `Utiliza este JSON como referencia inicial:\n${jsonSnapshot}`,
+            );
+          } catch (err) {
+            console.warn("refineScenarioDraft failed", err);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : String(err);
+          setJsonError(`No se pudo preparar el borrador: ${message}`);
+        }
+      } finally {
+        isSyncingBusinessDraft.current = false;
+      }
+    };
+
+    void syncDraft();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    state.designerJson,
+    state.designerSource,
+    state.draftId,
+    updateState,
+  ]);
+
+  const handleToggleCollapsed = useCallback(() => {
     updateState((prev) => {
-      if (prev.isOpen) {
-        return { ...prev, isOpen: false, wizardStep: 1 };
+      if (prev.isCollapsed) {
+        const baseStep =
+          prev.designerSource && prev.designerSource.kind === "business"
+            ? (prev.wizardStep === 1 ? 2 : prev.wizardStep)
+            : prev.wizardStep;
+
+        return {
+          ...prev,
+          isCollapsed: false,
+          wizardStep: baseStep as WizardStep,
+        };
       }
 
-      const baseStep =
-        prev.designerSource && prev.designerSource.kind === "business"
-          ? (prev.wizardStep >= 3 ? prev.wizardStep : 3)
-          : prev.wizardStep >= 2
-            ? prev.wizardStep
-            : 2;
-
-      return {
-        ...prev,
-        isOpen: true,
-        wizardStep: baseStep as 2 | 3 | 4 | 5,
-      };
+      return { ...prev, isCollapsed: true };
     });
   }, [updateState]);
 
+  const handleCollapsePanel = useCallback(() => {
+    updateState((prev) => ({ ...prev, isCollapsed: true }));
+  }, [updateState]);
+
   const handleStartFromScratch = useCallback(() => {
+    setIdeaError(null);
+    setJsonError(null);
     updateState({
-      isOpen: true,
-      wizardStep: 2,
+      isCollapsed: false,
+      wizardStep: 1,
       designerSource: { kind: "manual" },
       selectedScenario: "",
       descriptionText: "",
@@ -296,33 +348,70 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
       validation: { ...initialValidation },
       mermaidCode: "",
       curlSnippet: "",
+      draftId: null,
+      draftSummary: null,
     });
   }, [updateState]);
 
   const handleDescriptionChange = useCallback(
     (value: string) => {
+      setIdeaError(null);
       updateState((prev) => ({ ...prev, descriptionText: value }));
     },
     [updateState],
   );
 
+  const handleGenerateIdea = useCallback(async () => {
+    const description = stateRef.current.descriptionText.trim();
+
+    if (!description) {
+      setIdeaError("Describe el escenario antes de generar la idea.");
+      return;
+    }
+
+    setIsGeneratingIdea(true);
+    setIdeaError(null);
+
+    try {
+      let draftId = stateRef.current.draftId;
+      if (!draftId) {
+        const created = await createScenarioDraft(description);
+        draftId = created.id;
+      } else {
+        await refineScenarioDraft(draftId, description);
+      }
+
+      const summary = await fetchDraftSummary(draftId);
+
+      updateState((prev) => ({
+        ...prev,
+        draftId,
+        draftSummary: summary,
+        designerSource: { kind: "manual" },
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setIdeaError(`No se ha podido generar la propuesta de escenario: ${message}`);
+    } finally {
+      setIsGeneratingIdea(false);
+    }
+  }, [updateState]);
+
   const handleContinueFromDescription = useCallback(() => {
     updateState((prev) => ({
       ...prev,
       designerSource: { kind: "manual" },
-      designerJson: JSON.stringify(
-        createScenarioSkeleton(prev.descriptionText),
-        null,
-        2,
-      ),
+      designerJson: "",
       validation: { ...initialValidation },
       mermaidCode: "",
-      wizardStep: 3,
+      curlSnippet: "",
+      wizardStep: 2,
     }));
   }, [updateState]);
 
   const handleDesignerJsonChange = useCallback(
     (value: string) => {
+      setJsonError(null);
       updateState((prev) => ({
         ...prev,
         designerJson: value,
@@ -343,23 +432,23 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
   }, [runValidation]);
 
   const handleNext = useCallback(() => {
-    updateState((prev) => ({ ...prev, wizardStep: 4 }));
+    updateState((prev) => ({ ...prev, wizardStep: 3 }));
   }, [updateState]);
 
   const handleBack = useCallback(() => {
     updateState((prev) => {
       switch (prev.wizardStep) {
-        case 5:
-          return { ...prev, wizardStep: 4 };
         case 4:
           return { ...prev, wizardStep: 3 };
         case 3:
-          if (prev.designerSource && prev.designerSource.kind === "manual") {
-            return { ...prev, wizardStep: 2 };
-          }
-          return { ...prev, wizardStep: 1, isOpen: false };
+          return { ...prev, wizardStep: 2 };
         case 2:
-          return { ...prev, wizardStep: 1, isOpen: false };
+          if (prev.designerSource && prev.designerSource.kind === "manual") {
+            return { ...prev, wizardStep: 1 };
+          }
+          return { ...prev, isCollapsed: true };
+        case 1:
+          return { ...prev, isCollapsed: true };
         default:
           return prev;
       }
@@ -380,7 +469,7 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
       toast.success("Escenario aplicado correctamente.");
       updateState((prev) => ({
         ...prev,
-        wizardStep: 5,
+        wizardStep: 4,
         curlSnippet: buildCurl(scenario, queueBase),
       }));
     } catch (err) {
@@ -391,26 +480,56 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
     }
   }, [queueBase, updateState]);
 
-  const handleRefine = useCallback(async (value: string) => {
-    if (!value.trim()) {
-      return "Describe el escenario para obtener sugerencias.";
+  const handleGenerateJson = useCallback(async () => {
+    const draftId = stateRef.current.draftId;
+
+    if (!draftId) {
+      setJsonError("No hay un borrador activo para generar el JSON.");
+      return;
     }
 
-    return `Idea inicial:\n${value.trim()}\n\nDefine dominios, eventos y listeners en el paso siguiente.`;
-  }, []);
+    setIsGeneratingJson(true);
+    setJsonError(null);
+
+    try {
+      const generated = await generateDraftJson(draftId);
+      if (!generated.generatedScenario) {
+        throw new Error("Respuesta sin escenario generado");
+      }
+
+      const json = JSON.stringify(generated.generatedScenario, null, 2);
+      updateState((prev) => ({
+        ...prev,
+        designerJson: json,
+        validation: { ...initialValidation },
+        mermaidCode: "",
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setJsonError(`No se pudo generar el JSON: ${message}`);
+    } finally {
+      setIsGeneratingJson(false);
+    }
+  }, [updateState]);
+
+  const canContinueFromDescription = Boolean(state.draftId && state.draftSummary);
 
   const stepContent = useMemo(() => {
     switch (state.wizardStep) {
-      case 2:
+      case 1:
         return (
           <StepDescribe
             descriptionText={state.descriptionText}
             onDescriptionChange={handleDescriptionChange}
+            onGenerate={handleGenerateIdea}
             onContinue={handleContinueFromDescription}
-            onRefine={handleRefine}
+            isGenerating={isGeneratingIdea}
+            summary={state.draftSummary}
+            error={ideaError}
+            canContinue={canContinueFromDescription}
           />
         );
-      case 3:
+      case 2:
         return (
           <StepJson
             designerJson={state.designerJson}
@@ -420,9 +539,13 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
             onNext={handleNext}
             onBack={handleBack}
             designerSource={state.designerSource}
+            onGenerateFromDraft={handleGenerateJson}
+            canGenerateFromDraft={Boolean(state.draftId)}
+            isGeneratingFromDraft={isGeneratingJson}
+            generationError={jsonError}
           />
         );
-      case 4:
+      case 3:
         return (
           <StepMermaid
             mermaidCode={state.mermaidCode}
@@ -432,7 +555,7 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
             isApplying={isApplying}
           />
         );
-      case 5:
+      case 4:
         return <StepCurl curlSnippet={state.curlSnippet} onBack={handleBack} />;
       default:
         return (
@@ -442,19 +565,27 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
         );
     }
   }, [
+    canContinueFromDescription,
     handleApplyScenario,
     handleBack,
     handleContinueFromDescription,
     handleDescriptionChange,
     handleDesignerJsonChange,
+    handleGenerateIdea,
+    handleGenerateJson,
     handleNext,
-    handleRefine,
     handleValidateNow,
+    ideaError,
     isApplying,
+    isGeneratingIdea,
+    isGeneratingJson,
+    jsonError,
     state.curlSnippet,
     state.descriptionText,
     state.designerJson,
     state.designerSource,
+    state.draftId,
+    state.draftSummary,
     state.mermaidCode,
     state.validation,
     state.wizardStep,
@@ -462,49 +593,58 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
 
   return (
     <section className="w-full border-b border-zinc-800 bg-zinc-950 text-[11px] text-zinc-300">
-      <button
-        type="button"
-        onClick={handleToggleOpen}
-        aria-expanded={state.isOpen}
-        aria-controls="scenario-wizard-panel"
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-zinc-900 text-zinc-300 hover:bg-zinc-900/70"
-      >
+      <div className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-zinc-900 text-zinc-300">
         <span>Nuevo escenario</span>
-        <span>{state.isOpen ? "[-]" : "[+]"}</span>
-      </button>
-      {state.isOpen ? (
+        <button
+          type="button"
+          onClick={handleToggleCollapsed}
+          aria-expanded={!state.isCollapsed}
+          aria-controls="scenario-wizard-panel"
+          className="px-2 py-1 border border-zinc-700 rounded text-xs hover:bg-zinc-800"
+        >
+          {state.isCollapsed ? "Expandir" : "Colapsar"}
+        </button>
+      </div>
+      {state.isCollapsed ? null : (
         <div
           id="scenario-wizard-panel"
           className="px-3 py-3 space-y-4 border-t border-zinc-800"
         >
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            {[
-              { id: 1, label: "1 Colapsado" },
-              { id: 2, label: "2 Descripción" },
-              { id: 3, label: "3 JSON" },
-              { id: 4, label: "4 Mermaid" },
-              { id: 5, label: "5 CURL" },
-            ].map((definition) => (
-              <WizardStepIndicator
-                key={definition.id}
-                currentStep={state.wizardStep}
-                definition={definition}
-              />
-            ))}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { id: 1, label: "Descripción" },
+                { id: 2, label: "JSON" },
+                { id: 3, label: "Mermaid" },
+                { id: 4, label: "CURL" },
+              ].map((definition) => (
+                <WizardStepIndicator
+                  key={definition.id}
+                  currentStep={state.wizardStep}
+                  definition={definition}
+                />
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCollapsePanel}
+                className="px-2 py-1 rounded border border-zinc-700 text-zinc-300 hover:bg-zinc-900"
+              >
+                Colapsar panel
+              </button>
+              <button
+                type="button"
+                onClick={handleStartFromScratch}
+                className="px-2 py-1 rounded border border-green-600 text-green-400 hover:bg-zinc-900"
+              >
+                Nuevo borrador
+              </button>
+            </div>
           </div>
           <div className="border border-zinc-800 rounded px-3 py-3 bg-zinc-950/60">
             {stepContent}
           </div>
-        </div>
-      ) : (
-        <div className="px-3 py-3 border-t border-zinc-800">
-          <button
-            type="button"
-            onClick={handleStartFromScratch}
-            className="px-3 py-1.5 rounded border border-green-600 text-green-400 text-xs hover:bg-zinc-900/60"
-          >
-            Crear desde cero
-          </button>
         </div>
       )}
     </section>
@@ -527,5 +667,9 @@ function WizardStepIndicator({
     ? "border-green-600 text-green-400 bg-zinc-900"
     : "border-zinc-700 text-zinc-400";
 
-  return <span className={`${baseClasses} ${stateClasses}`}>[{definition.label}]</span>;
+  return (
+    <span className={`${baseClasses} ${stateClasses}`}>
+      [{definition.id} {definition.label}]
+    </span>
+  );
 }

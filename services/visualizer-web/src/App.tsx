@@ -280,11 +280,14 @@ export default function App() {
       ...prev,
       selectedScenario: name,
       designerSource: { kind: "business", name },
-      isOpen: true,
-      wizardStep: 3,
+      isCollapsed: false,
+      wizardStep: 2,
       validation: { status: "idle", errors: [] },
       mermaidCode: "",
       curlSnippet: "",
+      descriptionText: "",
+      draftId: null,
+      draftSummary: null,
     }));
 
     try {
@@ -306,6 +309,8 @@ export default function App() {
         designerJson: "",
         validation: { status: "invalid", errors: [errorMessage] },
         mermaidCode: "",
+        draftId: null,
+        draftSummary: null,
       }));
     }
   };
@@ -364,7 +369,7 @@ export default function App() {
           className="bg-zinc-900 border border-zinc-700 text-zinc-200 text-xs px-2 py-1 rounded"
         >
           <option value="">
-            {scenarioOptions.length === 0 ? 'loading…' : 'Elegir…'}
+            {scenarioOptions.length === 0 ? "Cargando…" : "Elegir escenario…"}
           </option>
           {scenarioOptions.map((option) => (
             <option key={option.name} value={option.name}>

@@ -22,6 +22,10 @@ type StepJsonProps = {
   onNext: () => void;
   onBack: () => void;
   designerSource: DesignerSource;
+  onGenerateFromDraft?: () => void;
+  canGenerateFromDraft?: boolean;
+  isGeneratingFromDraft?: boolean;
+  generationError?: string | null;
 };
 
 export function StepJson({
@@ -32,6 +36,10 @@ export function StepJson({
   onNext,
   onBack,
   designerSource,
+  onGenerateFromDraft,
+  canGenerateFromDraft = false,
+  isGeneratingFromDraft = false,
+  generationError,
 }: StepJsonProps) {
   const statusLabel = useMemo(() => {
     switch (validation.status) {
@@ -83,6 +91,9 @@ export function StepJson({
           ))}
         </div>
       ) : null}
+      {generationError ? (
+        <div className="text-[10px] text-red-400">{generationError}</div>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -91,6 +102,16 @@ export function StepJson({
         >
           Atrás
         </button>
+        {onGenerateFromDraft ? (
+          <button
+            type="button"
+            onClick={onGenerateFromDraft}
+            disabled={!canGenerateFromDraft || isGeneratingFromDraft}
+            className="px-3 py-1.5 rounded border border-zinc-600 text-zinc-200 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGeneratingFromDraft ? "Generando JSON…" : "Generar JSON con IA"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onValidateNow}
