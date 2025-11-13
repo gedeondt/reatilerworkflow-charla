@@ -95,9 +95,11 @@ export type DraftCreationResponse = {
 };
 
 export type GenerateJsonResponse = {
-  id: string;
-  status: 'generated';
-  generatedScenario: Record<string, unknown>;
+  scenario: Record<string, unknown>;
+  bootstrapExample?: {
+    queue: string;
+    event: Record<string, unknown>;
+  };
 };
 
 export type JsonPromptResponse = {
