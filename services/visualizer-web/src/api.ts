@@ -198,7 +198,19 @@ export async function generateDraftJson(
     throw new Error(await parseErrorResponse(res));
   }
 
-  return res.json();
+  const data = await res.json();
+  const scenario =
+    data && typeof data === "object" && "content" in data
+      ? data.content
+      : data;
+
+  return {
+    scenario,
+    bootstrapExample:
+      data && typeof data === "object" && "bootstrapExample" in data
+        ? data.bootstrapExample
+        : undefined,
+  };
 }
 
 export async function fetchScenarioDraftJsonPrompt(
