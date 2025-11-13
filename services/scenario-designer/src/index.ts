@@ -96,6 +96,26 @@ type ScenarioDraft = {
 
 const drafts = new Map<string, ScenarioDraft>();
 
+const buildJsonGenerationPrompt = (
+  draft: ScenarioDraft,
+  language: ScenarioLanguage,
+): string => {
+  return scenarioJsonPrompt(
+    {
+      inputDescription: draft.inputDescription,
+      currentProposal: draft.currentProposal,
+    },
+    language,
+  );
+};
+
+const jsonPromptQuerySchema = z
+  .object({
+    language: z.literal('es').optional(),
+  })
+  .strict()
+  .optional();
+
 const buildDraftSummary = (draft: ScenarioDraft) => {
   const hasGeneratedScenario = Boolean(draft.generatedScenario);
   let guidance = 'Genera el JSON del escenario cuando la propuesta esté lista.';
@@ -306,7 +326,7 @@ const generateScenarioJson = async (
 
   const baseMessages: ChatCompletionMessageParam[] = [
     systemMessage,
-    { role: 'user', content: scenarioJsonPrompt(draft, language) },
+    { role: 'user', content: buildJsonGenerationPrompt(draft, language) },
   ];
 
   const firstResponse = await requestOpenAIContent(baseMessages);
@@ -546,6 +566,46 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
       });
   }
 });
+
+app.get<{ Params: DraftParams; Querystring: { language?: string } }>(
+  '/scenario-drafts/:id/json-prompt',
+  async (request, reply) => {
+    const { id } = request.params;
+    const draft = drafts.get(id);
+
+    if (!draft) {
+      return reply
+        .status(404)
+        .send({ message: 'No se encontró el borrador del escenario.' });
+    }
+
+    const parsedQuery = jsonPromptQuerySchema.safeParse(request.query);
+
+    if (!parsedQuery.success) {
+      return reply
+        .status(400)
+        .send({ message: 'Parámetros inválidos.', issues: parsedQuery.error.issues });
+    }
+
+    const language: ScenarioLanguage = (parsedQuery.data?.language ?? 'es') as ScenarioLanguage;
+
+    try {
+      const prompt = buildJsonGenerationPrompt(draft, language);
+      return reply.send({
+        draftId: id,
+        prompt,
+        language,
+        generatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      request.log.error({ err: error, draftId: id }, 'failed to build JSON prompt');
+      return reply.status(500).send({
+        error: 'prompt_generation_failed',
+        message: 'No se pudo preparar el prompt del escenario.',
+      });
+    }
+  },
+);
 
 app.get<{ Params: DraftParams }>('/scenario-drafts/:id/summary', async (request, reply) => {
   const { id } = request.params;

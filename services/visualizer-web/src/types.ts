@@ -100,6 +100,13 @@ export type GenerateJsonResponse = {
   generatedScenario: Record<string, unknown>;
 };
 
+export type JsonPromptResponse = {
+  draftId: string;
+  prompt: string;
+  language?: string;
+  generatedAt?: string;
+};
+
 export type ScenarioBootstrapResponse =
   | { hasBootstrap: false }
   | { hasBootstrap: true; queue: string; event: Record<string, unknown> };

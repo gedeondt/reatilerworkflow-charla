@@ -26,6 +26,11 @@ type StepJsonProps = {
   canGenerateFromDraft?: boolean;
   isGeneratingFromDraft?: boolean;
   generationError?: string | null;
+  onGeneratePrompt?: () => void;
+  canGeneratePrompt?: boolean;
+  isGeneratingPrompt?: boolean;
+  promptText?: string;
+  promptError?: string | null;
 };
 
 export function StepJson({
@@ -40,6 +45,11 @@ export function StepJson({
   canGenerateFromDraft = false,
   isGeneratingFromDraft = false,
   generationError,
+  onGeneratePrompt,
+  canGeneratePrompt = false,
+  isGeneratingPrompt = false,
+  promptText = "",
+  promptError,
 }: StepJsonProps) {
   const statusLabel = useMemo(() => {
     switch (validation.status) {
@@ -93,6 +103,37 @@ export function StepJson({
       ) : null}
       {generationError ? (
         <div className="text-[10px] text-red-400">{generationError}</div>
+      ) : null}
+      {onGeneratePrompt ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onGeneratePrompt}
+              disabled={!canGeneratePrompt || isGeneratingPrompt}
+              className="px-3 py-1.5 rounded border border-zinc-600 text-zinc-200 text-xs hover:bg-zinc-900/60 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Generar prompt
+            </button>
+            {isGeneratingPrompt ? (
+              <span className="text-[10px] text-zinc-500">Cargando…</span>
+            ) : null}
+            {promptError ? (
+              <span className="text-[10px] text-red-400">{promptError}</span>
+            ) : null}
+          </div>
+          <div className="space-y-1">
+            <label className="uppercase text-[10px] text-zinc-500">
+              Prompt que se enviará a OpenAI
+            </label>
+            <textarea
+              value={promptText}
+              readOnly
+              placeholder="Genera el prompt para revisar las instrucciones enviadas a OpenAI"
+              className="w-full min-h-[200px] font-mono text-[11px] bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-zinc-200 placeholder:text-zinc-600 focus:outline-none"
+            />
+          </div>
+        </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <button

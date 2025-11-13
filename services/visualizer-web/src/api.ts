@@ -11,6 +11,7 @@ import type {
   DraftCreationResponse,
   GenerateJsonResponse,
   ScenarioBootstrapResponse,
+  JsonPromptResponse,
 } from "./types";
 
 const API_BASE =
@@ -191,6 +192,20 @@ export async function generateDraftJson(
     {
       method: "POST",
     },
+  );
+
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res));
+  }
+
+  return res.json();
+}
+
+export async function fetchScenarioDraftJsonPrompt(
+  draftId: string,
+): Promise<JsonPromptResponse> {
+  const res = await fetch(
+    `${DESIGNER_BASE}/scenario-drafts/${encodeURIComponent(draftId)}/json-prompt`,
   );
 
   if (!res.ok) {
