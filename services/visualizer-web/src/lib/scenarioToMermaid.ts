@@ -82,37 +82,6 @@ const registerAnonymousParticipant = (
   return participant;
 };
 
-/**
- * Heurística para deducir el dominio emisor de un listener.
- * Prioriza propiedades explícitas y cae hacia patrones comunes del DSL
- * cuando faltan datos directos.
- */
-const inferSourceDomain = (
-  listener: Record<string, unknown>,
-  domainIdHint?: string | null,
-): string | null => {
-  if (typeof domainIdHint === "string" && domainIdHint.trim().length > 0) {
-    return domainIdHint.trim();
-  }
-
-  if (typeof listener.domain === "string" && listener.domain.trim().length > 0) {
-    return listener.domain.trim();
-  }
-
-  if (isRecord(listener.on) && typeof listener.on.domain === "string" && listener.on.domain.trim().length > 0) {
-    return listener.on.domain.trim();
-  }
-
-  if (typeof listener.id === "string") {
-    const match = listener.id.match(/^([^\s]+?)-on-/i);
-    if (match && match[1]) {
-      return match[1];
-    }
-  }
-
-  return null;
-};
-
 const extractParticipantsFromDomains = (
   scenario: Record<string, unknown>,
   registry: ParticipantRegistry,
@@ -181,62 +150,63 @@ const extractInteractions = (
   const seenInteractions = new Set<string>();
 
   domainEntries.forEach((domain) => {
-    const domainId = typeof domain.id === "string" && domain.id.trim().length > 0
-      ? domain.id.trim()
-      : null;
-
     const listeners = Array.isArray(domain.listeners)
       ? domain.listeners.filter(isRecord)
       : [];
 
     listeners.forEach((listener) => {
-      const baseEvent = isRecord(listener.on) && typeof listener.on.event === "string"
+      const triggeringEvent = isRecord(listener.on) && typeof listener.on.event === "string"
         ? listener.on.event.trim()
         : null;
+
+      if (!triggeringEvent) {
+        notes.push("Listener sin evento desencadenante conocido.");
+        return;
+      }
+
+      const sourceDomain = eventOwners.get(triggeringEvent) ?? null;
+
+      if (!sourceDomain) {
+        notes.push(`No se encontró el dominio para el evento "${triggeringEvent}".`);
+        return;
+      }
 
       const actions = Array.isArray(listener.actions)
         ? listener.actions.filter(isRecord)
         : [];
 
-      const sourceDomain = inferSourceDomain(listener, domainId);
-
       actions.forEach((action) => {
         const type = typeof action.type === "string" ? action.type : null;
-        if (type !== "emit" && type !== "forward-event") {
+        if (type !== "emit") {
           return;
         }
 
-        const eventName = typeof action.event === "string"
+        const emittedEvent = typeof action.event === "string"
           ? action.event.trim()
-          : baseEvent;
+          : null;
 
-        const targetDomain = typeof action.toDomain === "string" && action.toDomain.trim().length > 0
-          ? action.toDomain.trim()
-          : eventName
-            ? eventOwners.get(eventName) ?? null
-            : null;
-
-        if (!eventName) {
-          notes.push("Evento emitido sin nombre conocido.");
+        if (!emittedEvent) {
+          notes.push("Acción emit sin evento definido.");
           return;
         }
 
-        if (!sourceDomain || !targetDomain) {
-          const missing = !sourceDomain ? "origen" : "destino";
-          notes.push(`No se pudo determinar el ${missing} para "${eventName}".`);
+        const targetDomain = eventOwners.get(emittedEvent) ?? null;
+
+        if (!targetDomain) {
+          notes.push(`No se encontró el dominio para el evento "${emittedEvent}".`);
           return;
         }
 
         const source = registerParticipant(registry, sourceDomain, sourceDomain);
         const target = registerParticipant(registry, targetDomain, targetDomain);
 
-        const key = `${source.alias}->${target.alias}:${eventName}`;
+        const key = `${source.alias}->${target.alias}:${emittedEvent}`;
         if (seenInteractions.has(key)) {
           return;
         }
 
         seenInteractions.add(key);
-        interactions.push(`${source.alias}->>${target.alias}: ${formatEventLabel(eventName)}`);
+        interactions.push(`${source.alias}->>${target.alias}: ${formatEventLabel(emittedEvent)}`);
       });
     });
   });
