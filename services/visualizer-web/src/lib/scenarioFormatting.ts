@@ -208,8 +208,8 @@ export function buildCurl(scenario: Scenario, queueBase: string): string {
   const jsonPayload = JSON.stringify(payload, null, 2);
 
   return [
-    `curl -X POST ${url}`,
-    '  -H "Content-Type: application/json"',
+    `curl -X POST ${url} \\',
+    '  -H "Content-Type: application/json" \\',
     `  -d '${jsonPayload}'`,
   ].join("\n");
 }
