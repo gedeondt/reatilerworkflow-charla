@@ -102,7 +102,9 @@ export function buildMermaid(scenario: Scenario): string {
 
     const domainEvents = domain.events ?? [];
     domainEvents.forEach((event) => {
-      eventToDomain.set(event.name, domain.id);
+      if (typeof event?.name === "string" && event.name.trim().length > 0) {
+        eventToDomain.set(event.name, domain.id);
+      }
     });
   });
 
@@ -110,20 +112,31 @@ export function buildMermaid(scenario: Scenario): string {
     const listeners = domain.listeners ?? [];
 
     listeners.forEach((listener) => {
+      const triggeringEventName = listener.on?.event;
+      const triggeringDomain =
+        typeof triggeringEventName === "string"
+          ? eventToDomain.get(triggeringEventName)
+          : undefined;
+
+      if (!triggeringDomain) {
+        return;
+      }
+
       const actions = listener.actions ?? [];
 
       actions.forEach((action) => {
         if (action.type === "emit") {
-          const eventName = action.event;
-          if (!eventName) {
+          const emittedEventName = action.event;
+          if (typeof emittedEventName !== "string") {
             return;
           }
 
-          const origin = domain.id;
-          const definedDomain = eventToDomain.get(eventName);
-          const target = definedDomain ?? action.toDomain ?? origin;
+          const targetDomain = eventToDomain.get(emittedEventName);
+          if (!targetDomain) {
+            return;
+          }
 
-          lines.push(`${origin}->>${target}: ${eventName}`);
+          lines.push(`${triggeringDomain}->>${targetDomain}: ${emittedEventName}`);
         }
 
         if (action.type === "set-state") {
