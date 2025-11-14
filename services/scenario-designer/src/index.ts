@@ -10,11 +10,9 @@ import {
   type ChatCompletionMessageParam,
 } from './openaiClient.js';
 import {
-  inspectScenarioContract,
-  type InspectScenarioContractFailure,
+  validateScenario,
   type ScenarioContract,
-  unwrapScenarioPayload,
-} from './scenarioContract.js';
+} from './domain/validateScenario.js';
 import {
   scenarioBootstrapPrompt,
   scenarioDslRules,
@@ -78,8 +76,8 @@ type ScenarioDraftHistoryEntry = {
   timestamp: string;
 };
 
-type GeneratedScenario = {
-  content: ScenarioContract;
+type GeneratedScenarioRecord = {
+  scenario: ScenarioContract;
   createdAt: string;
   bootstrapExample?: ScenarioBootstrapExample;
 };
@@ -91,7 +89,7 @@ type ScenarioDraft = {
   inputDescription: string;
   currentProposal: ScenarioProposal;
   history: ScenarioDraftHistoryEntry[];
-  generatedScenario?: GeneratedScenario;
+  generatedScenario?: GeneratedScenarioRecord;
   status: ScenarioDraftStatus;
 };
 
@@ -132,7 +130,7 @@ const buildDraftSummary = (draft: ScenarioDraft) => {
     status: draft.status,
     currentProposal: draft.currentProposal,
     hasGeneratedScenario,
-    generatedScenarioPreview: draft.generatedScenario?.content,
+    generatedScenarioPreview: draft.generatedScenario?.scenario,
     guidance,
   } as const;
 };
@@ -306,11 +304,27 @@ type GenerateScenarioJsonOk = {
 
 type GenerateScenarioJsonError = {
   ok: false;
-  failure: InspectScenarioContractFailure;
+  errors: string[];
+  rawScenario: unknown;
   response: string;
 };
 
 type GenerateScenarioJsonResult = GenerateScenarioJsonOk | GenerateScenarioJsonError;
+
+const interpretModelResponse = (response: string): GenerateScenarioJsonResult => {
+  const validation = validateScenario(response);
+
+  if (validation.ok) {
+    return { ok: true, scenario: validation.scenario };
+  }
+
+  return {
+    ok: false,
+    errors: validation.errors,
+    rawScenario: validation.rawScenario,
+    response,
+  };
+};
 
 const generateScenarioJson = async (
   draft: ScenarioDraft,
@@ -331,10 +345,10 @@ const generateScenarioJson = async (
   ];
 
   const firstResponse = await requestOpenAIContent(baseMessages);
-  const firstInspection = inspectScenarioContract(firstResponse);
+  const firstInspection = interpretModelResponse(firstResponse);
 
   if (firstInspection.ok) {
-    return { ok: true, scenario: firstInspection.scenario };
+    return firstInspection;
   }
 
   const retryMessages: ChatCompletionMessageParam[] = [
@@ -347,23 +361,19 @@ const generateScenarioJson = async (
         proposal: draft.currentProposal,
         language,
         previousResponse: firstResponse,
-        inspection: firstInspection.failure,
+        errors: firstInspection.errors,
       }),
     },
   ];
 
   const secondResponse = await requestOpenAIContent(retryMessages);
-  const secondInspection = inspectScenarioContract(secondResponse);
+  const secondInspection = interpretModelResponse(secondResponse);
 
   if (secondInspection.ok) {
-    return { ok: true, scenario: secondInspection.scenario };
+    return secondInspection;
   }
 
-  return {
-    ok: false,
-    failure: secondInspection.failure,
-    response: secondResponse,
-  };
+  return secondInspection;
 };
 
 const callOpenAI = async (prompt: string): Promise<ModelDraftResponse> => {
@@ -504,32 +514,20 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
     const result = await generateScenarioJson(draft, language);
 
     if (!result.ok) {
-      let candidateScenario: unknown = undefined;
-      let scenarioPayload: unknown = undefined;
-      try {
-        candidateScenario = JSON.parse(result.response);
-        scenarioPayload = unwrapScenarioPayload(candidateScenario);
-      } catch {
-        // ignore JSON parse errors
-      }
-
-      request.log.warn(
+      request.log.error(
         {
           draftId: id,
-          errors: result.failure.errors,
-          rawScenario: result.response?.slice(0, 4000),
-          scenarioPayload,
+          errors: result.errors,
+          rawScenario: result.rawScenario,
         },
         'generated scenario invalid',
       );
 
       return reply.status(422).send({
-        error: 'invalid_scenario_shape',
-        message:
-          'El escenario generado no cumple el contrato esperado. Revisa detalles y el candidato devuelto.',
-        details: result.failure.errors,
-        candidateScenario,
-        rawResponse: candidateScenario ? undefined : result.response,
+        status: 'error',
+        draftId: id,
+        errors: result.errors,
+        message: 'El escenario generado no cumple el DSL de saga-kernel.',
       });
     }
 
@@ -542,8 +540,8 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
       request.log.warn({ err }, 'failed to generate bootstrap example');
     }
 
-    const generatedScenario: GeneratedScenario = {
-      content: scenario,
+    const generatedScenario: GeneratedScenarioRecord = {
+      scenario,
       createdAt: new Date().toISOString(),
       ...(bootstrapExample ? { bootstrapExample } : {}),
     };
@@ -553,8 +551,10 @@ app.post<{ Params: DraftParams; Body: unknown }>('/scenario-drafts/:id/generate-
 
     return reply.send({
       id: draft.id,
-      status: 'generated',
-      generatedScenario,
+      status: 'ok',
+      generatedScenario: scenario,
+      bootstrapExample: bootstrapExample ?? undefined,
+      createdAt: generatedScenario.createdAt,
     });
   } catch (error) {
     if (error instanceof OpenAIRequestFailedError) {
@@ -675,7 +675,7 @@ app.get<{ Params: DraftParams }>('/scenario-drafts/:id/json', async (request, re
       .send({ message: 'No se encontró JSON generado para este borrador.' });
   }
 
-  return reply.send(draft.generatedScenario.content);
+  return reply.send(draft.generatedScenario.scenario);
 });
 
 app.get('/health', async (_request, reply) => {

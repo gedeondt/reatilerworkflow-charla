@@ -174,7 +174,6 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
       }));
 
       try {
-        console.log("EHOOOO",parsed);
         const result = await validateScenario(parsed);
         if (validationRequest.current !== requestId) {
           return;
@@ -509,8 +508,8 @@ export function ScenarioWizard({ state, setState, queueBase }: ScenarioWizardPro
     setJsonError(null);
 
     try {
-      const { generatedScenario, scenario } = await generateDraftJson(draftId);
-      const scenarioPayload = generatedScenario?.content ?? generatedScenario ?? scenario;
+      const response = await generateDraftJson(draftId);
+      const scenarioPayload = response.generatedScenario ?? response.scenario;
 
       if (!scenarioPayload) {
         throw new Error("Respuesta sin escenario generado");

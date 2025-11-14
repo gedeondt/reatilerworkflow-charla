@@ -1,4 +1,4 @@
-import type { InspectScenarioContractFailure, ScenarioContract } from './scenarioContract.js';
+import type { ScenarioContract } from './domain/validateScenario.js';
 
 export type ScenarioLanguage = 'es';
 
@@ -141,7 +141,7 @@ export type ScenarioJsonRetryPromptParams = {
   proposal: ScenarioProposalSummary;
   language: ScenarioLanguage;
   previousResponse: string;
-  inspection: InspectScenarioContractFailure;
+  errors: string[];
 };
 
 export const scenarioJsonRetryPrompt = ({
@@ -149,10 +149,10 @@ export const scenarioJsonRetryPrompt = ({
   proposal,
   language,
   previousResponse,
-  inspection,
+  errors,
 }: ScenarioJsonRetryPromptParams): string => {
   const proposalSummary = JSON.stringify(proposal, null, 2);
-  const errorsList = inspection.errors.map((error) => `- ${error}`).join('\n');
+  const errorsList = errors.map((error) => `- ${error}`).join('\n');
 
   return `La respuesta anterior no cumple el contrato del escenario. Corrige el JSON anterior siguiendo exactamente las reglas del DSL y estas correcciones:
 

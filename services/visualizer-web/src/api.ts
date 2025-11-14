@@ -47,7 +47,7 @@ async function parseErrorResponse(res: Response): Promise<string> {
 export async function fetchTraces(): Promise<TraceView[]> {
   const res = await fetch(`${API_BASE}/traces`);
   if (!res.ok) return [];
-  return res.json();
+  return (await res.json()) as GenerateJsonResponse;
 }
 
 export async function fetchLogs(): Promise<LogEntry[]> {
@@ -198,19 +198,7 @@ export async function generateDraftJson(
     throw new Error(await parseErrorResponse(res));
   }
 
-  const data = await res.json();
-  const scenario =
-    data && typeof data === "object" && "content" in data
-      ? data.content
-      : data;
-
-  return {
-    scenario,
-    bootstrapExample:
-      data && typeof data === "object" && "bootstrapExample" in data
-        ? data.bootstrapExample
-        : undefined,
-  };
+  return res.json();
 }
 
 export async function fetchScenarioDraftJsonPrompt(

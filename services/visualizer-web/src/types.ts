@@ -74,7 +74,7 @@ export type ScenarioProposal = {
 };
 
 export type GeneratedScenario = {
-  content: Record<string, unknown>;
+  scenario: Record<string, unknown>;
   createdAt: string;
   bootstrapExample?: {
     queue: string;
@@ -98,14 +98,14 @@ export type DraftCreationResponse = {
 
 export type GenerateJsonResponse = {
   id: string;
-  status: 'generated' | 'draft' | 'ready';
-  generatedScenario?: GeneratedScenario;
-  // Legacy shape kept for compatibility with older designer versions
+  status: 'ok' | 'draft' | 'ready' | 'generated';
+  generatedScenario: Record<string, unknown>;
   scenario?: Record<string, unknown>;
   bootstrapExample?: {
     queue: string;
     event: Record<string, unknown>;
   };
+  createdAt?: string;
 };
 
 export type JsonPromptResponse = {

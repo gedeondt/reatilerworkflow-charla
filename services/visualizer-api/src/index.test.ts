@@ -393,10 +393,10 @@ describe('POST /scenario/apply', () => {
       payload: { type: 'draft', draftId: 'legacy-draft' },
     });
 
-    expect(response.statusCode).toBe(502);
+    expect(response.statusCode).toBe(500);
     expect(response.json()).toMatchObject({
-      error: 'invalid_scenario_definition',
-      message: 'Generated scenario JSON is invalid.',
+      error: 'designer_invalid_scenario',
+      message: 'Failed to load generated scenario from scenario-designer.',
     });
     expect(mockedAxios.get).toHaveBeenCalledTimes(2);
     expect(__testing.getActiveScenario()).toEqual({

@@ -230,7 +230,7 @@ const ScenarioBootstrapSchema = z
 
 const GeneratedScenarioSchema = z
   .object({
-    content: ScenarioDefinitionSchema,
+    scenario: ScenarioDefinitionSchema,
     createdAt: z.string(),
     bootstrapExample: ScenarioBootstrapSchema.optional(),
   })
@@ -348,26 +348,23 @@ const fetchDraftScenarioDefinition = async (
 
     const rawDefinition = response.data;
 
-    if (
-      rawDefinition &&
-      typeof rawDefinition === 'object' &&
-      (Array.isArray((rawDefinition as Record<string, unknown>).events) ||
-        Array.isArray((rawDefinition as Record<string, unknown>).listeners))
-    ) {
-      throw new HttpError(502, {
-        error: 'invalid_scenario_definition',
-        message: 'Generated scenario JSON is invalid.',
-      });
-    }
-
     try {
       return normalizeScenario(rawDefinition);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        throw new HttpError(502, {
-          error: 'invalid_scenario_definition',
-          message: 'Generated scenario JSON is invalid.',
-          issues: error.issues.map((issue) => issue.message),
+        app.log.error(
+          {
+            source: 'visualizer-api',
+            reason: 'scenario-apply-failed',
+            draftId,
+            errors: error.issues.map((issue) => issue.message),
+          },
+          'failed to parse scenario from designer',
+        );
+
+        throw new HttpError(500, {
+          error: 'designer_invalid_scenario',
+          message: 'Failed to load generated scenario from scenario-designer.',
         });
       }
 
