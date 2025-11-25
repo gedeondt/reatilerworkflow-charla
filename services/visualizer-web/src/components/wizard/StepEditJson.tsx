@@ -50,6 +50,8 @@ function buildMermaid(scenario: any): string {
   const lines: string[] = ["sequenceDiagram", "autonumber"];
   const domains = Array.isArray(scenario?.domains) ? scenario.domains : [];
   const eventToDomain = new Map<string, string>();
+  const eventToConsumer = new Map<string, string>();
+  const seen = new Set<string>();
 
   domains.forEach((domain: any, index: number) => {
     if (!isRecord(domain)) {
@@ -59,8 +61,13 @@ function buildMermaid(scenario: any): string {
     const domainId = asString(domain.id) ?? `domain_${index + 1}`;
     lines.push(`participant ${domainId}`);
 
-    const events = Array.isArray(domain.events) ? domain.events : [];
-    events.forEach((event: any) => {
+    const domainEvents = Array.isArray(domain.publishes) && domain.publishes.length > 0
+      ? domain.publishes
+      : Array.isArray(domain.events)
+        ? domain.events
+        : [];
+
+    domainEvents.forEach((event: any) => {
       if (isRecord(event)) {
         const eventName = asString(event.name);
         if (eventName) {
@@ -83,7 +90,39 @@ function buildMermaid(scenario: any): string {
         return;
       }
 
+      const triggeringEventName = asString(listener.on?.event);
+      if (triggeringEventName) {
+        eventToConsumer.set(triggeringEventName, domainId);
+      }
+    });
+  });
+
+  domains.forEach((domain: any, index: number) => {
+    if (!isRecord(domain)) {
+      return;
+    }
+
+    const domainId = asString(domain.id) ?? `domain_${index + 1}`;
+    const listeners = Array.isArray(domain.listeners) ? domain.listeners : [];
+
+    listeners.forEach((listener: any) => {
+      if (!isRecord(listener)) {
+        return;
+      }
+
       const actions = Array.isArray(listener.actions) ? listener.actions : [];
+
+      const sourceDomain =
+        asString(listener.on?.fromDomain) ??
+        (triggeringEventName ? eventToDomain.get(triggeringEventName) ?? domainId : domainId);
+
+      if (sourceDomain && sourceDomain !== domainId && triggeringEventName) {
+        const key = `${sourceDomain}->${domainId}:${triggeringEventName}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          lines.push(`${sourceDomain}->>${domainId}: ${triggeringEventName}`);
+        }
+      }
 
       actions.forEach((action: any) => {
         if (!isRecord(action)) {
@@ -97,9 +136,13 @@ function buildMermaid(scenario: any): string {
           }
 
           const targetDomain =
-            eventToDomain.get(eventName) ?? asString(action.toDomain) ?? domainId;
+            eventToConsumer.get(eventName) ?? eventToDomain.get(eventName) ?? asString(action.toDomain) ?? domainId;
 
-          lines.push(`${domainId}->>${targetDomain}: ${eventName}`);
+          const key = `${domainId}->${targetDomain}:${eventName}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            lines.push(`${domainId}->>${targetDomain}: ${eventName}`);
+          }
         } else if (action.type === "set-state") {
           const status = asString(action.status);
           const label = status ? `set-state ${status}` : "set-state";

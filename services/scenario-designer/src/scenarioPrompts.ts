@@ -29,16 +29,21 @@ DomainSpec:
 {
   "id": string,
   "queue": string,
-  "events"?: Event[],
+  "publishes"?: Event[],
   "listeners"?: Listener[]
 }
 
-- TODOS los eventos y listeners deben declararse dentro de su dominio usando "domains[*].events" y "domains[*].listeners".
+- Declara los eventos que el dominio emite en "domains[*].publishes" (alias "events" solo por compatibilidad).
+- Marca exactamente un evento en todo el escenario con "start": true: es el que arranca la SAGA.
+- Asume flujos lineales: cada evento debe ser consumido por un único listener (no hagas fan-out).
+- No dupliques listas top-level "events" ni "listeners": todo vive dentro de cada dominio.
+- Evita listeners autocontenidos que reaccionen a eventos del mismo dominio solo para reenviarlos; las reacciones viven en el dominio consumidor.
 - Está prohibido usar las listas top-level "events" o "listeners".
 
 Event:
 {
   "name": string,
+  "start"?: boolean,
   "payloadSchema": PayloadSchema
 }
 
@@ -55,17 +60,18 @@ PayloadSchema permitido:
 Listener:
 {
   "id": string,
-  "on": { "event": string },
+  "on": { "event": string, "fromDomain"?: string },
   "delayMs"?: number,
   "actions": Action[]
 }
 
 Acciones válidas:
 - set-state → { "type": "set-state", "status": string }
-- emit → { "type": "emit", "event": string, "toDomain"?: string, "mapping": Mapping }
+- emit → { "type": "emit", "event": string, "mapping": Mapping }
 
-- Los nombres de eventos son globales y únicos. Cualquier listener puede reaccionar al evento declarado en "on.event" sin importar el dominio que lo definió.
-- Si defines "emit.toDomain", debe coincidir con el dominio que declaró ese evento. Si lo omites, se usa automáticamente el dominio propietario del evento destino.
+- Los nombres de eventos son globales y únicos. Los listeners viven en el dominio consumidor y reaccionan a eventos publicados por otros dominios.
+- Usa "fromDomain" para reforzar qué dominio publica el evento que escucha el listener.
+- Las acciones "emit" deben referenciar eventos publicados por el propio dominio (normalmente definidos en "publishes"). No incluyas "toDomain".
 - Los listeners viven dentro de su dominio y su "id" debe ser único en todo el escenario.
 
 Reglas críticas para Mapping:
@@ -91,6 +97,7 @@ Reglas críticas para Mapping:
 - No declares campos en mapping que no existan en el payloadSchema destino.
 
 Prohibido:
+- Declarar "toDomain" en acciones "emit": el dominio destino se infiere del evento publicado.
 - Cualquier clave extra (fields, steps, lanes, subscribesTo, sagaSummary, openQuestions, metadata, etc.).
 - Estructuras de mapping diferentes a las descritas.
 `.trim();
@@ -106,9 +113,11 @@ export const scenarioJsonPrompt = (
 ${scenarioDslRules}
 
 Recuerda:
-- Define los eventos y listeners dentro de cada dominio usando "domains[*].events" y "domains[*].listeners".
+- Declara los eventos publicados en "domains[*].publishes" (alias legacy: "events") y los listeners en "domains[*].listeners".
 - No declares las listas top-level "events" ni "listeners" en el escenario generado.
 - Mantén los nombres de los eventos únicos y reutilízalos cuando otros dominios deban reaccionar.
+- Los listeners deben vivir en el dominio consumidor; evita generar listeners que reboten el mismo evento publicado por su dominio.
+- Marca exactamente un evento con "start": true (el que arranca la SAGA) y asegura un flujo lineal: cada evento es consumido por un único listener.
 
 Cuando generes mappings:
 - No inventes arrays escalares ni uses sufijos "[]". Cuando el destino tenga un array, debe estar descrito como array de objetos y debes usar { "arrayFrom": "...", "map": { ... } }.
@@ -159,8 +168,9 @@ export const scenarioJsonRetryPrompt = ({
 ${scenarioDslRules}
 
   Reglas adicionales:
-  - Declara "events" y "listeners" dentro del dominio correspondiente; no utilices listas top-level.
+  - Declara "publishes" (o su alias "events") y "listeners" dentro del dominio correspondiente; no utilices listas top-level.
   - Mantén los nombres de eventos únicos en todo el escenario.
+  - Asegura linealidad: cada evento solo puede tener un listener que lo consuma.
 
   Errores detectados:
   ${errorsList}

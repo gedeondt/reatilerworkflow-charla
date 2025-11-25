@@ -124,6 +124,10 @@ const extractInteractions = (
     : [];
 
   const eventOwners = new Map<string, string>();
+  const eventConsumers = new Map<string, string>();
+  let startEventName: string | null = null;
+  let startOwner: string | null = null;
+  const eventConsumers = new Map<string, string>();
 
   domainEntries.forEach((domain) => {
     const domainId = typeof domain.id === "string" && domain.id.trim().length > 0
@@ -134,13 +138,23 @@ const extractInteractions = (
       return;
     }
 
-    const events = Array.isArray(domain.events)
-      ? domain.events.filter(isRecord)
-      : [];
+    const publishes = Array.isArray(domain.publishes)
+      ? domain.publishes.filter(isRecord)
+      : null;
+
+    const events = publishes && publishes.length > 0
+      ? publishes
+      : Array.isArray(domain.events)
+        ? domain.events.filter(isRecord)
+        : [];
 
     events.forEach((event) => {
       if (typeof event.name === "string" && event.name.trim().length > 0) {
         eventOwners.set(event.name.trim(), domainId);
+        if (event.start === true) {
+          startEventName = event.name.trim();
+          startOwner = domainId;
+        }
       }
     });
   });
@@ -159,16 +173,53 @@ const extractInteractions = (
         ? listener.on.event.trim()
         : null;
 
+      if (triggeringEvent) {
+        eventConsumers.set(triggeringEvent, domain.id as string);
+      }
+    });
+  });
+
+  if (startEventName && startOwner) {
+    registerAnonymousParticipant(registry, "start");
+    interactions.push(
+      `start-->>${registerParticipant(registry, startOwner, startOwner).alias}: ${formatEventLabel(startEventName)}`
+    );
+  }
+
+  domainEntries.forEach((domain) => {
+    const listeners = Array.isArray(domain.listeners)
+      ? domain.listeners.filter(isRecord)
+      : [];
+
+    listeners.forEach((listener) => {
+      const triggeringEvent = isRecord(listener.on) && typeof listener.on.event === "string"
+        ? listener.on.event.trim()
+        : null;
+
       if (!triggeringEvent) {
         notes.push("Listener sin evento desencadenante conocido.");
         return;
       }
 
-      const sourceDomain = eventOwners.get(triggeringEvent) ?? null;
+      const declaredFromDomain = isRecord(listener.on) && typeof listener.on.fromDomain === "string"
+        ? listener.on.fromDomain.trim()
+        : null;
+
+      const sourceDomain = declaredFromDomain || eventOwners.get(triggeringEvent) ?? null;
 
       if (!sourceDomain) {
         notes.push(`No se encontró el dominio para el evento "${triggeringEvent}".`);
         return;
+      }
+
+      if (sourceDomain !== domain.id) {
+        const source = registerParticipant(registry, sourceDomain, sourceDomain);
+        const consumer = registerParticipant(registry, domain.id, domain.id);
+        const key = `${source.alias}->${consumer.alias}:${triggeringEvent}`;
+        if (!seenInteractions.has(key)) {
+          seenInteractions.add(key);
+          interactions.push(`${source.alias}->>${consumer.alias}: ${formatEventLabel(triggeringEvent)}`);
+        }
       }
 
       const actions = Array.isArray(listener.actions)
@@ -190,7 +241,7 @@ const extractInteractions = (
           return;
         }
 
-        const targetDomain = eventOwners.get(emittedEvent) ?? null;
+        const targetDomain = eventConsumers.get(emittedEvent) ?? eventOwners.get(emittedEvent) ?? null;
 
         if (!targetDomain) {
           notes.push(`No se encontró el dominio para el evento "${emittedEvent}".`);

@@ -96,7 +96,7 @@ const listenerSchema = z
   .object({
     id: z.string(),
     delayMs: z.number().optional(),
-    on: z.object({ event: z.string() }).strict(),
+    on: z.object({ event: z.string(), fromDomain: z.string().optional() }).strict(),
     actions: z.array(listenerActionSchema),
   })
   .strict();
@@ -105,6 +105,7 @@ const eventSchema = z
   .object({
     name: z.string(),
     payloadSchema: payloadSchemaDefinition,
+    start: z.boolean().optional(),
   })
   .strict();
 
@@ -112,6 +113,7 @@ const domainSchema = z
   .object({
     id: z.string(),
     queue: z.string(),
+    publishes: z.array(eventSchema).optional(),
     events: z.array(eventSchema).optional(),
     listeners: z.array(listenerSchema).optional(),
   })
@@ -465,6 +467,8 @@ export const scenarioSchema = z
   .superRefine((scenario, ctx) => {
     const domainIds = new Map<string, number>();
     const events = new Map<string, EventRegistryEntry>();
+    const startEvents: Array<{ domainIndex: number; eventIndex: number; pathSegment: 'publishes' | 'events' }> = [];
+    const listenersByEvent = new Map<string, Array<{ domainIndex: number; listenerIndex: number }>>();
 
     scenario.domains.forEach((domain, domainIndex) => {
       if (domainIds.has(domain.id)) {
@@ -473,11 +477,24 @@ export const scenarioSchema = z
         domainIds.set(domain.id, domainIndex);
       }
 
-      domain.events?.forEach((event, eventIndex) => {
+      const declaredEvents = [
+        ...(domain.publishes ?? []).map((event, eventIndex) => ({
+          event,
+          pathSegment: 'publishes' as const,
+          eventIndex,
+        })),
+        ...(domain.events ?? []).map((event, eventIndex) => ({
+          event,
+          pathSegment: 'events' as const,
+          eventIndex,
+        })),
+      ];
+
+      declaredEvents.forEach(({ event, pathSegment, eventIndex }) => {
         if (events.has(event.name)) {
           addIssue(
             ctx,
-            ['domains', domainIndex, 'events', eventIndex, 'name'],
+            ['domains', domainIndex, pathSegment, eventIndex, 'name'],
             `Event "${event.name}" is declared more than once`,
           );
         } else {
@@ -487,6 +504,10 @@ export const scenarioSchema = z
             eventIndex,
             payloadSchema: event.payloadSchema as PayloadSchema,
           });
+
+          if (event.start) {
+            startEvents.push({ domainIndex, eventIndex, pathSegment });
+          }
         }
       });
     });
@@ -501,6 +522,17 @@ export const scenarioSchema = z
             ctx,
             [...listenerPath, 'on', 'event'],
             `Listener "${listener.id}" references unknown event "${listener.on.event}"`,
+          );
+        }
+
+        const alreadyRegistered = listenersByEvent.get(listener.on.event) ?? [];
+        listenersByEvent.set(listener.on.event, [...alreadyRegistered, { domainIndex, listenerIndex }]);
+
+        if (listener.on.fromDomain && sourceEvent && sourceEvent.domainId !== listener.on.fromDomain) {
+          addIssue(
+            ctx,
+            [...listenerPath, 'on', 'fromDomain'],
+            `Listener "${listener.id}" expects event "${listener.on.event}" from domain "${listener.on.fromDomain}" but it belongs to "${sourceEvent.domainId}"`,
           );
         }
 
@@ -541,6 +573,34 @@ export const scenarioSchema = z
         });
       });
     });
+
+    if (startEvents.length === 0) {
+      addIssue(ctx, ['domains'], 'No start event defined. Mark exactly one event with "start": true to bootstrap the saga.');
+    }
+
+    if (startEvents.length > 1) {
+      startEvents.forEach(({ domainIndex, eventIndex, pathSegment }) => {
+        addIssue(
+          ctx,
+          ['domains', domainIndex, pathSegment, eventIndex, 'start'],
+          'Only one event can be marked with "start": true in the entire scenario',
+        );
+      });
+    }
+
+    listenersByEvent.forEach((entries, eventName) => {
+      if (entries.length <= 1) {
+        return;
+      }
+
+      entries.forEach(({ domainIndex, listenerIndex }) => {
+        addIssue(
+          ctx,
+          ['domains', domainIndex, 'listeners', listenerIndex, 'on', 'event'],
+          `Event "${eventName}" is consumed by more than one listener; linear scenarios require a single listener per event.`,
+        );
+      });
+    });
   });
 
 type RawScenarioEvent = z.infer<typeof eventSchema>;
@@ -552,13 +612,36 @@ export type SetStateAction = Extract<ListenerAction, { type: 'set-state' }>;
 export type EmitAction = Extract<ListenerAction, { type: 'emit' }>;
 export type Listener = z.infer<typeof listenerSchema>;
 export type ScenarioEvent = Omit<RawScenarioEvent, 'payloadSchema'> & { payloadSchema: PayloadSchema };
-export type Domain = Omit<RawDomain, 'events' | 'listeners'> & {
+export type Domain = Omit<RawDomain, 'publishes' | 'events' | 'listeners'> & {
+  publishes?: ScenarioEvent[];
   events?: ScenarioEvent[];
   listeners?: Listener[];
 };
 export type Scenario = Omit<RawScenario, 'domains'> & { domains: Domain[] };
 
+export const getDomainEvents = (domain: Domain): ScenarioEvent[] => {
+  const publishes = domain.publishes ?? [];
+
+  if (Array.isArray(publishes) && publishes.length > 0) {
+    return publishes;
+  }
+
+  return domain.events ?? [];
+};
+
 export function normalizeScenario(raw: unknown): Scenario {
   const parsed = scenarioSchema.parse(raw);
-  return parsed as Scenario;
+
+  const normalizedDomains = parsed.domains.map((domain) => {
+    const publishes =
+      domain.publishes && domain.publishes.length > 0 ? domain.publishes : domain.events;
+
+    if (publishes && publishes !== domain.publishes) {
+      return { ...domain, publishes };
+    }
+
+    return domain;
+  });
+
+  return { ...parsed, domains: normalizedDomains } as Scenario;
 }

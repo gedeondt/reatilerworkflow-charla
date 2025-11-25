@@ -8,7 +8,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import chalk from 'chalk';
 
 import { eventEnvelopeSchema, type EventEnvelope } from '@reatiler/shared';
-import { loadScenario, type Domain, type Scenario } from '@reatiler/saga-kernel';
+import { getDomainEvents, loadScenario, type Domain, type Scenario } from '@reatiler/saga-kernel';
 
 import { createRenderer, type Renderer } from './render';
 import {
@@ -656,7 +656,7 @@ function createScenarioContext(scenario: Scenario, domains: Domain[]): ScenarioC
   const eventOwners = new Map<string, string>();
 
   for (const domain of scenario.domains) {
-    for (const event of domain.events ?? []) {
+    for (const event of getDomainEvents(domain)) {
       eventOwners.set(event.name, domain.id);
     }
   }

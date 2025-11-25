@@ -1,6 +1,18 @@
 import type { Scenario } from "@reatiler/saga-kernel";
 
-type DomainEvent = NonNullable<Scenario["domains"][number]["events"]>[number];
+const domainEvents = (domain: Scenario["domains"][number] | undefined) => {
+  if (!domain) {
+    return [] as NonNullable<Scenario["domains"][number]["publishes"]>;
+  }
+
+  if (Array.isArray(domain.publishes) && domain.publishes.length > 0) {
+    return domain.publishes;
+  }
+
+  return domain.events ?? [];
+};
+
+type DomainEvent = ReturnType<typeof domainEvents>[number];
 type Summary = {
   domainsCount: number;
   eventsCount: number;
@@ -79,7 +91,7 @@ function findEventDomain(
   eventName: string,
 ): { domainId: string; queue: string } | null {
   for (const domain of scenario.domains) {
-    const domainEvents = domain.events ?? [];
+    const domainEvents = getDomainEvents(domain);
     for (const event of domainEvents) {
       if (event.name === eventName) {
         return { domainId: domain.id, queue: domain.queue };
@@ -96,59 +108,111 @@ function normalizeBaseUrl(value: string): string {
 export function buildMermaid(scenario: Scenario): string {
   const lines: string[] = ["sequenceDiagram", "autonumber"];
   const eventToDomain = new Map<string, string>();
+  const eventToConsumer = new Map<string, { domainId: string; listener: NonNullable<Scenario["domains"][number]["listeners"]>[number] }>();
+  const seen = new Set<string>();
 
   scenario.domains.forEach((domain) => {
     lines.push(`participant ${domain.id}`);
 
-    const domainEvents = domain.events ?? [];
-    domainEvents.forEach((event) => {
+    domainEvents(domain).forEach((event) => {
       if (typeof event?.name === "string" && event.name.trim().length > 0) {
         eventToDomain.set(event.name, domain.id);
       }
     });
-  });
 
-  scenario.domains.forEach((domain) => {
-    const listeners = domain.listeners ?? [];
-
-    listeners.forEach((listener) => {
+    domain.listeners?.forEach((listener) => {
       const triggeringEventName = listener.on?.event;
-      const triggeringDomain =
-        typeof triggeringEventName === "string"
-          ? eventToDomain.get(triggeringEventName)
-          : undefined;
-
-      if (!triggeringDomain) {
-        return;
+      if (typeof triggeringEventName === "string") {
+        eventToConsumer.set(triggeringEventName, { domainId: domain.id, listener });
       }
-
-      const actions = listener.actions ?? [];
-
-      actions.forEach((action) => {
-        if (action.type === "emit") {
-          const emittedEventName = action.event;
-          if (typeof emittedEventName !== "string") {
-            return;
-          }
-
-          const targetDomain = eventToDomain.get(emittedEventName);
-          if (!targetDomain) {
-            return;
-          }
-
-          lines.push(`${triggeringDomain}->>${targetDomain}: ${emittedEventName}`);
-        }
-
-        if (action.type === "set-state") {
-          const label = action.status ? `set-state ${action.status}` : "set-state";
-          lines.push(`${domain.id}-->>${domain.id}: ${label}`);
-        }
-      });
     });
   });
 
-  if (lines.length <= 2) {
-    lines.push("Note over Escenario: Sin interacciones detectadas");
+  const startEventEntry = (() => {
+    for (const domain of scenario.domains) {
+      const start = domainEvents(domain).find((event) => event.start);
+      if (start) {
+        return { event: start, owner: domain.id };
+      }
+    }
+    return null;
+  })();
+
+  if (!startEventEntry) {
+    if (lines.length <= 2) {
+      lines.push("Note over Escenario: Sin interacciones detectadas");
+    }
+    return lines.join("\n");
+  }
+
+  lines.push("participant start");
+
+  const visitedEvents = new Set<string>();
+  let currentEventName = startEventEntry.event.name;
+  let currentOwner = startEventEntry.owner;
+
+  const addSetState = (domainId: string, status?: string) => {
+    const label = status ? `set-state ${status}` : "set-state";
+    lines.push(`${domainId}-->>${domainId}: ${label}`);
+  };
+
+  lines.push(`start-->>${currentOwner}: ${currentEventName}`);
+
+  while (currentEventName && !visitedEvents.has(currentEventName)) {
+    visitedEvents.add(currentEventName);
+    const consumer = eventToConsumer.get(currentEventName);
+
+    if (!consumer) {
+      break;
+    }
+
+    const { domainId, listener } = consumer;
+
+    if (domainId !== currentOwner) {
+      const key = `${currentOwner}->${domainId}:${currentEventName}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        lines.push(`${currentOwner}->>${domainId}: ${currentEventName}`);
+      }
+    }
+
+    let nextEvent: string | null = null;
+    for (const action of listener.actions ?? []) {
+      if (action.type === "set-state") {
+        addSetState(domainId, action.status);
+        continue;
+      }
+
+      if (action.type === "emit") {
+        const emittedEventName = action.event;
+        if (typeof emittedEventName !== "string") {
+          continue;
+        }
+
+        const targetDomain =
+          eventToConsumer.get(emittedEventName)?.domainId ??
+          eventToDomain.get(emittedEventName);
+
+        if (targetDomain) {
+          const key = `${domainId}->${targetDomain}:${emittedEventName}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            lines.push(`${domainId}->>${targetDomain}: ${emittedEventName}`);
+          }
+        }
+
+        if (!nextEvent) {
+          nextEvent = emittedEventName;
+        }
+      }
+    }
+
+    if (!nextEvent) {
+      break;
+    }
+
+    currentEventName = nextEvent;
+    currentOwner = eventToDomain.get(currentEventName) ?? domainId;
   }
 
   return lines.join("\n");
@@ -161,11 +225,14 @@ export function buildCurl(scenario: Scenario, queueBase: string): string {
     event: DomainEvent;
   }> = [];
   const emittedEvents = new Set<string>();
+  let startEvent: { domainId: string; queue: string; event: DomainEvent } | null = null;
 
   scenario.domains.forEach((domain) => {
-    const domainEvents = domain.events ?? [];
-    domainEvents.forEach((event) => {
+    domainEvents(domain).forEach((event) => {
       definedEvents.push({ domainId: domain.id, queue: domain.queue, event });
+      if (event.start) {
+        startEvent = { domainId: domain.id, queue: domain.queue, event };
+      }
     });
 
     const listeners = domain.listeners ?? [];
@@ -184,6 +251,7 @@ export function buildCurl(scenario: Scenario, queueBase: string): string {
   }
 
   const primaryEvent =
+    startEvent ??
     definedEvents.find((entry) => !emittedEvents.has(entry.event.name)) ??
     definedEvents[0];
 
@@ -220,7 +288,7 @@ export function buildSummary(scenario: Scenario): Summary {
   let listenersCount = 0;
 
   scenario.domains.forEach((domain) => {
-    eventsCount += domain.events?.length ?? 0;
+    eventsCount += domainEvents(domain).length;
     listenersCount += domain.listeners?.length ?? 0;
   });
 

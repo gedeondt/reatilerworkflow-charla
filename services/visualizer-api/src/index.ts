@@ -6,7 +6,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import axios from 'axios';
 import { z } from 'zod';
-import { loadScenario, normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
+import { getDomainEvents, loadScenario, normalizeScenario, type Scenario } from '@reatiler/saga-kernel';
 
 type TraceEvent = {
   eventName: string;
@@ -133,8 +133,8 @@ const summarizeScenarioDefinition = (definition: Scenario) => {
 
   const domainsCount = domains.length;
   const eventsCount = domains.reduce((total, domain) => {
-    const events = Array.isArray(domain.events) ? domain.events : [];
-    return total + events.length;
+    const events = getDomainEvents(domain);
+    return total + (Array.isArray(events) ? events.length : 0);
   }, 0);
   const listenersCount = domains.reduce((total, domain) => {
     const listeners = Array.isArray(domain.listeners) ? domain.listeners : [];

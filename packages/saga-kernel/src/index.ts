@@ -12,7 +12,7 @@ export type {
   ArrayObjectMapping,
   EmitMapping
 } from './schema.js';
-export { scenarioSchema, normalizeScenario } from './schema.js';
+export { scenarioSchema, normalizeScenario, getDomainEvents } from './schema.js';
 
 export { loadScenario } from './loader.js';
 

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { EventBus, EventEnvelope } from '@reatiler/shared/event-bus';
 
 import { applyEmitMapping } from './mapping.js';
+import { getDomainEvents } from './schema.js';
 import type { Listener, ListenerAction, Scenario, ScenarioEvent } from './schema.js';
 
 export type Logger = {
@@ -56,7 +57,7 @@ export function createScenarioRuntime({
   for (const domain of scenario.domains) {
     domainQueues.set(domain.id, domain.queue);
 
-    for (const event of domain.events ?? []) {
+    for (const event of getDomainEvents(domain)) {
       eventsByName.set(event.name, { event, domainId: domain.id });
     }
 

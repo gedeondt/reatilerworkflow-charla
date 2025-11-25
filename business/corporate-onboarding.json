@@ -1,13 +1,14 @@
 {
   "name": "Corporate Onboarding Saga",
-  "version": 1,
+  "version": 2,
   "domains": [
     {
       "id": "hr",
       "queue": "hr",
-      "events": [
+      "publishes": [
         {
           "name": "EmployeeHired",
+          "start": true,
           "payloadSchema": {
             "employeeId": "string",
             "fullName": "string",
@@ -16,11 +17,12 @@
           }
         },
         {
-          "name": "PayrollAccountCreated",
+          "name": "EmployeeCreated",
           "payloadSchema": {
             "employeeId": "string",
-            "payrollAccountId": "string",
-            "salary": "number"
+            "fullName": "string",
+            "department": "string",
+            "email": "string"
           }
         },
         {
@@ -44,23 +46,31 @@
             {
               "type": "emit",
               "event": "EmployeeCreated",
-              "toDomain": "payroll",
               "mapping": {
                 "employeeId": "employeeId",
-                "email": { "const": "employee@corp.example" },
-                "department": "department"
+                "fullName": "fullName",
+                "department": "department",
+                "email": { "const": "employee@corp.example" }
               }
             }
           ]
         },
         {
-          "id": "hr-on-EmployeeActivated",
+          "id": "hr-on-AccessGranted",
           "delayMs": 80,
-          "on": { "event": "EmployeeActivated" },
+          "on": { "event": "AccessGranted", "fromDomain": "security" },
           "actions": [
             {
               "type": "set-state",
               "status": "ACTIVE"
+            },
+            {
+              "type": "emit",
+              "event": "EmployeeActivated",
+              "mapping": {
+                "employeeId": "employeeId",
+                "activationDate": { "const": "2025-01-01" }
+              }
             }
           ]
         }
@@ -69,13 +79,14 @@
     {
       "id": "payroll",
       "queue": "payroll",
-      "events": [
+      "publishes": [
         {
-          "name": "EmployeeCreated",
+          "name": "PayrollAccountCreated",
           "payloadSchema": {
             "employeeId": "string",
-            "email": "string",
-            "department": "string"
+            "payrollAccountId": "string",
+            "salary": "number",
+            "email": "string"
           }
         }
       ],
@@ -83,7 +94,7 @@
         {
           "id": "payroll-on-EmployeeCreated",
           "delayMs": 120,
-          "on": { "event": "EmployeeCreated" },
+          "on": { "event": "EmployeeCreated", "fromDomain": "hr" },
           "actions": [
             {
               "type": "set-state",
@@ -92,11 +103,11 @@
             {
               "type": "emit",
               "event": "PayrollAccountCreated",
-              "toDomain": "hr",
               "mapping": {
                 "employeeId": "employeeId",
                 "payrollAccountId": { "const": "PAYROLL-001" },
-                "salary": { "const": 50000 }
+                "salary": { "const": 50000 },
+                "email": "email"
               }
             }
           ]
@@ -106,11 +117,21 @@
     {
       "id": "it",
       "queue": "it",
+      "publishes": [
+        {
+          "name": "ITAccountCreated",
+          "payloadSchema": {
+            "employeeId": "string",
+            "itAccountId": "string",
+            "email": "string"
+          }
+        }
+      ],
       "listeners": [
         {
-          "id": "it-on-EmployeeCreated",
+          "id": "it-on-PayrollAccountCreated",
           "delayMs": 200,
-          "on": { "event": "EmployeeCreated" },
+          "on": { "event": "PayrollAccountCreated", "fromDomain": "payroll" },
           "actions": [
             {
               "type": "set-state",
@@ -119,7 +140,6 @@
             {
               "type": "emit",
               "event": "ITAccountCreated",
-              "toDomain": "facilities",
               "mapping": {
                 "employeeId": "employeeId",
                 "itAccountId": { "const": "IT-001" },
@@ -133,13 +153,14 @@
     {
       "id": "facilities",
       "queue": "facilities",
-      "events": [
+      "publishes": [
         {
-          "name": "ITAccountCreated",
+          "name": "FacilitiesReady",
           "payloadSchema": {
             "employeeId": "string",
-            "itAccountId": "string",
-            "email": "string"
+            "deskId": "string",
+            "building": "string",
+            "floor": "string"
           }
         }
       ],
@@ -147,7 +168,7 @@
         {
           "id": "facilities-on-ITAccountCreated",
           "delayMs": 200,
-          "on": { "event": "ITAccountCreated" },
+          "on": { "event": "ITAccountCreated", "fromDomain": "it" },
           "actions": [
             {
               "type": "set-state",
@@ -156,7 +177,6 @@
             {
               "type": "emit",
               "event": "FacilitiesReady",
-              "toDomain": "security",
               "mapping": {
                 "employeeId": "employeeId",
                 "deskId": { "const": "D-101" },
@@ -171,14 +191,12 @@
     {
       "id": "security",
       "queue": "security",
-      "events": [
+      "publishes": [
         {
-          "name": "FacilitiesReady",
+          "name": "AccessGranted",
           "payloadSchema": {
             "employeeId": "string",
-            "deskId": "string",
-            "building": "string",
-            "floor": "string"
+            "badgeId": "string"
           }
         }
       ],
@@ -186,7 +204,7 @@
         {
           "id": "security-on-FacilitiesReady",
           "delayMs": 150,
-          "on": { "event": "FacilitiesReady" },
+          "on": { "event": "FacilitiesReady", "fromDomain": "facilities" },
           "actions": [
             {
               "type": "set-state",
@@ -194,11 +212,10 @@
             },
             {
               "type": "emit",
-              "event": "EmployeeActivated",
-              "toDomain": "hr",
+              "event": "AccessGranted",
               "mapping": {
                 "employeeId": "employeeId",
-                "activationDate": { "const": "2024-01-01" }
+                "badgeId": { "const": "BADGE-001" }
               }
             }
           ]

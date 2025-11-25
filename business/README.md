@@ -1,6 +1,6 @@
 # Modelos de escenarios de negocio
 
-Este directorio almacena la fuente de verdad declarativa para las SAGA retail. Cada archivo JSON describe dominios, eventos y listeners que el runtime interpreta sin lógica adicional. El objetivo es poder versionar la orquestación completa desde aquí y reutilizarla en `scenario-runner`, `visualizer-api`, el CLI y la interfaz web.【F:services/scenario-runner/src/index.ts†L400-L520】【F:services/visualizer-api/src/index.ts†L496-L720】【F:packages/visualizer-cli/src/index.ts†L1-L120】
+Este directorio almacena la fuente de verdad declarativa para las SAGA retail. Cada archivo JSON describe dominios, los eventos que publican y los listeners con los que reaccionan a eventos de otros dominios; el runtime interpreta todo sin lógica adicional. El objetivo es poder versionar la orquestación completa desde aquí y reutilizarla en `scenario-runner`, `visualizer-api`, el CLI y la interfaz web.【F:services/scenario-runner/src/index.ts†L400-L520】【F:services/visualizer-api/src/index.ts†L496-L720】【F:packages/visualizer-cli/src/index.ts†L1-L120】
 
 ## Formato del fichero JSON
 
@@ -11,14 +11,14 @@ Cada escenario debe seguir el DSL validado por `@reatiler/saga-kernel`:
 - `domains` (`array`): dominios que participan en la SAGA. Cada dominio incluye:
   - `id`: identificador lógico (por ejemplo, `order`).
   - `queue`: cola de `message-queue` usada para publicar y consumir eventos.
-- `events` (`array`): catálogo de eventos de negocio relevantes. Cada elemento define `name` y `payloadSchema`.
-- `listeners` (`array`): reacciones a los eventos declarados.
-  - `id`: identificador único del listener.
-  - `on`: bloque con el `event` que lo dispara.
-  - `delayMs` (opcional): tiempo simulado antes de procesar el evento.
-  - `actions`: lista de acciones a ejecutar. Tipos soportados:
-    - `emit`: publica `event` hacia `toDomain`.
-    - `set-state`: marca el dominio propietario del listener con el `status` indicado.
+  - `publishes` (`array`, alias legacy: `events`): catálogo de eventos que el dominio publica. Cada elemento define `name`, `payloadSchema` y opcionalmente `start: true` para el único evento que arranca la SAGA.
+  - `listeners` (`array`): reacciones a eventos declarados en cualquier dominio (en flujos lineales, cada evento lo consume un único listener).
+    - `id`: identificador único del listener.
+    - `on`: bloque con el `event` que lo dispara y, opcionalmente, `fromDomain` para especificar quién lo publica. No se admite más de un listener por evento en escenarios lineales.
+    - `delayMs` (opcional): tiempo simulado antes de procesar el evento.
+    - `actions`: lista de acciones a ejecutar. Tipos soportados:
+      - `emit`: publica un `event` propio del dominio (no requiere `toDomain`).
+      - `set-state`: marca el dominio propietario del listener con el `status` indicado.
 
 ### `payloadSchema`: contrato de datos de cada evento
 

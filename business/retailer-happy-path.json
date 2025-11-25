@@ -1,13 +1,14 @@
 {
   "name": "Retailer Happy Path Saga",
-  "version": 1,
+  "version": 2,
   "domains": [
     {
       "id": "order",
       "queue": "orders",
-      "events": [
+      "publishes": [
         {
           "name": "OrderPlaced",
+          "start": true,
           "payloadSchema": {
             "orderId": "string",
             "lines": [
@@ -26,14 +27,6 @@
           }
         },
         {
-          "name": "PaymentCaptured",
-          "payloadSchema": {
-            "paymentId": "string",
-            "orderId": "string",
-            "amount": "number"
-          }
-        },
-        {
           "name": "OrderConfirmed",
           "payloadSchema": {
             "orderId": "string",
@@ -43,46 +36,9 @@
       ],
       "listeners": [
         {
-          "id": "order-on-OrderPlaced",
-          "delayMs": 20,
-          "on": { "event": "OrderPlaced" },
-          "actions": [
-            {
-              "type": "set-state",
-              "status": "PLACED"
-            },
-            {
-              "type": "emit",
-              "event": "InventoryReserved",
-              "toDomain": "inventory",
-              "mapping": {
-                "reservationId": { "const": "RES-001" },
-                "orderId": "orderId",
-                "items": {
-                  "arrayFrom": "lines",
-                  "map": {
-                    "sku": "sku",
-                    "qty": "qty"
-                  }
-                },
-                "amount": "amount",
-                "address": {
-                  "map": {
-                    "line1": { "from": "line1" },
-                    "city": { "from": "city" },
-                    "zip": { "from": "zip" },
-                    "country": { "from": "country" }
-                  },
-                  "objectFrom": "address"
-                }
-              }
-            }
-          ]
-        },
-        {
           "id": "order-on-PaymentCaptured",
           "delayMs": 25,
-          "on": { "event": "PaymentCaptured" },
+          "on": { "event": "PaymentCaptured", "fromDomain": "payments" },
           "actions": [
             {
               "type": "set-state",
@@ -91,7 +47,6 @@
             {
               "type": "emit",
               "event": "OrderConfirmed",
-              "toDomain": "order",
               "mapping": {
                 "orderId": "orderId",
                 "status": { "const": "CONFIRMED" }
@@ -104,7 +59,7 @@
     {
       "id": "inventory",
       "queue": "inventory",
-      "events": [
+      "publishes": [
         {
           "name": "InventoryReserved",
           "payloadSchema": {
@@ -130,7 +85,7 @@
         {
           "id": "inventory-on-InventoryReserved",
           "delayMs": 30,
-          "on": { "event": "InventoryReserved" },
+          "on": { "event": "OrderPlaced", "fromDomain": "order" },
           "actions": [
             {
               "type": "set-state",
@@ -138,8 +93,74 @@
             },
             {
               "type": "emit",
+              "event": "InventoryReserved",
+              "mapping": {
+                "orderId": "orderId",
+                "reservationId": { "const": "RES-001" },
+                "items": {
+                  "arrayFrom": "lines",
+                  "map": {
+                    "sku": "sku",
+                    "qty": "qty"
+                  }
+                },
+                "amount": "amount",
+                "address": {
+                  "map": {
+                    "line1": { "from": "line1" },
+                    "city": { "from": "city" },
+                    "zip": { "from": "zip" },
+                    "country": { "from": "country" }
+                  },
+                  "objectFrom": "address"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "payments",
+      "queue": "payments",
+      "publishes": [
+        {
+          "name": "PaymentAuthorized",
+          "payloadSchema": {
+            "paymentId": "string",
+            "orderId": "string",
+            "reservationId": "string",
+            "amount": "number",
+            "address": {
+              "line1": "string",
+              "city": "string",
+              "zip": "string",
+              "country": "string"
+            }
+          }
+        },
+        {
+          "name": "PaymentCaptured",
+          "payloadSchema": {
+            "paymentId": "string",
+            "orderId": "string",
+            "amount": "number"
+          }
+        }
+      ],
+      "listeners": [
+        {
+          "id": "payments-on-PaymentAuthorized",
+          "delayMs": 40,
+          "on": { "event": "InventoryReserved", "fromDomain": "inventory" },
+          "actions": [
+            {
+              "type": "set-state",
+              "status": "AUTHORIZED"
+            },
+            {
+              "type": "emit",
               "event": "PaymentAuthorized",
-              "toDomain": "payments",
               "mapping": {
                 "paymentId": { "const": "PAY-001" },
                 "orderId": "orderId",
@@ -157,57 +178,23 @@
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "id": "payments",
-      "queue": "payments",
-      "events": [
+        },
         {
-          "name": "PaymentAuthorized",
-          "payloadSchema": {
-            "paymentId": "string",
-            "orderId": "string",
-            "reservationId": "string",
-            "amount": "number",
-            "address": {
-              "line1": "string",
-              "city": "string",
-              "zip": "string",
-              "country": "string"
-            }
-          }
-        }
-      ],
-      "listeners": [
-        {
-          "id": "payments-on-PaymentAuthorized",
-          "delayMs": 40,
-          "on": { "event": "PaymentAuthorized" },
+          "id": "payments-on-ShipmentPrepared",
+          "delayMs": 30,
+          "on": { "event": "ShipmentPrepared", "fromDomain": "shipping" },
           "actions": [
             {
               "type": "set-state",
-              "status": "AUTHORIZED"
+              "status": "CAPTURED"
             },
             {
               "type": "emit",
-              "event": "ShipmentPrepared",
-              "toDomain": "shipping",
+              "event": "PaymentCaptured",
               "mapping": {
-                "shipmentId": { "const": "SHIP-001" },
-                "orderId": "orderId",
                 "paymentId": "paymentId",
-                "amount": "amount",
-                "address": {
-                  "objectFrom": "address",
-                  "map": {
-                    "line1": "line1",
-                    "city": "city",
-                    "zip": "zip",
-                    "country": "country"
-                  }
-                }
+                "orderId": "orderId",
+                "amount": "amount"
               }
             }
           ]
@@ -217,7 +204,7 @@
     {
       "id": "shipping",
       "queue": "shipping",
-      "events": [
+      "publishes": [
         {
           "name": "ShipmentPrepared",
           "payloadSchema": {
@@ -238,7 +225,7 @@
         {
           "id": "shipping-on-ShipmentPrepared",
           "delayMs": 50,
-          "on": { "event": "ShipmentPrepared" },
+          "on": { "event": "PaymentAuthorized", "fromDomain": "payments" },
           "actions": [
             {
               "type": "set-state",
@@ -246,12 +233,21 @@
             },
             {
               "type": "emit",
-              "event": "PaymentCaptured",
-              "toDomain": "order",
+              "event": "ShipmentPrepared",
               "mapping": {
-                "paymentId": "paymentId",
+                "shipmentId": { "const": "SHIP-001" },
                 "orderId": "orderId",
-                "amount": "amount"
+                "paymentId": "paymentId",
+                "amount": "amount",
+                "address": {
+                  "objectFrom": "address",
+                  "map": {
+                    "line1": "line1",
+                    "city": "city",
+                    "zip": "zip",
+                    "country": "country"
+                  }
+                }
               }
             }
           ]
