@@ -68,16 +68,8 @@ export function createScenarioRuntime({
     }
   }
 
-  const state = new Map<string, Map<string, string>>();
-
   let running = false;
   const workers = new Map<string, WorkerController>();
-
-  function updateState(correlationId: string, domainId: string, status: string): void {
-    const domainState = state.get(correlationId) ?? new Map<string, string>();
-    domainState.set(domainId, status);
-    state.set(correlationId, domainState);
-  }
 
   async function executeEmit(
     action: ListenerAction & { type: 'emit' },
@@ -167,22 +159,8 @@ export function createScenarioRuntime({
   async function executeAction(
     action: ListenerAction,
     envelope: EventEnvelope,
-    listenerId: string,
-    listenerDomainId: string
+    listenerId: string
   ): Promise<void> {
-    if (action.type === 'set-state') {
-      updateState(envelope.correlationId, listenerDomainId, action.status);
-
-      logger.debug({
-        action: 'set-state',
-        correlationId: envelope.correlationId,
-        domain: listenerDomainId,
-        status: action.status
-      });
-
-      return;
-    }
-
     await executeEmit(action, envelope, listenerId);
   }
 
@@ -322,13 +300,7 @@ export function createScenarioRuntime({
       await stopWorkers();
     },
     getStateSnapshot(): Record<string, Record<string, string>> {
-      const snapshot: Record<string, Record<string, string>> = {};
-
-      for (const [correlationId, domainState] of state.entries()) {
-        snapshot[correlationId] = Object.fromEntries(domainState.entries());
-      }
-
-      return snapshot;
+      return {};
     }
   };
 }

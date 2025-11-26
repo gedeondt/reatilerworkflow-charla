@@ -82,11 +82,11 @@ sequenceDiagram
     SR-->>C: OrderConfirmed (evento final reflejado en visualizer)
 ```
 
-Cada listener puede declarar un `delayMs` para simular tiempos de procesamiento y emite eventos hacia otros dominios utilizando acciones `emit`. En los escenarios lineales asumidos por la generación asistida, cada evento es consumido por un único listener para facilitar la visualización. Las acciones `set-state` actualizan el estado visible por `visualizer-api`, el CLI y la interfaz web.【F:business/retailer-happy-path.json†L94-L160】
+Cada listener puede declarar un `delayMs` para simular tiempos de procesamiento y emite eventos hacia otros dominios utilizando acciones `emit`. En los escenarios lineales asumidos por la generación asistida, cada evento es consumido por un único listener para facilitar la visualización.【F:business/retailer-happy-path.json†L94-L160】
 
 ## Escenarios alternativos y compensaciones
 
-El DSL permite definir caminos de compensación usando eventos adicionales y acciones `set-state` con estados que incluyan `fail`, `cancel`, `refund`, etc. Estos estados son interpretados por el CLI y la web para colorear los eventos y resaltar fallos o compensaciones.【F:packages/visualizer-cli/src/index.ts†L85-L120】
+El DSL permite definir caminos de compensación usando eventos adicionales; sin acciones de estado, los fallos o cancelaciones se representan como eventos específicos (p. ej., `PaymentFailed`, `OrderCancelled`).【F:packages/visualizer-cli/src/index.ts†L85-L120】
 
 Para disparar flujos alternativos puedes:
 

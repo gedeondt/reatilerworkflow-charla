@@ -17,7 +17,7 @@ class RecordingEventBus extends FakeEventBus {
 }
 
 describe('scenario runtime', () => {
-  it('processes listeners, emits events, tracks state and respects delays', async () => {
+  it('processes listeners, emits events y respeta delays', async () => {
     const scenario: Scenario = {
       name: 'Mini scenario',
       version: 1,
@@ -34,15 +34,13 @@ describe('scenario runtime', () => {
               on: { event: 'Initial' },
               delayMs: 50,
               actions: [
-                { type: 'set-state', status: 'PROCESSED' },
                 {
                   type: 'emit',
                   event: 'FollowUp',
                   toDomain: 'target',
                   mapping: {
                     orderId: 'orderId',
-                    amount: 'amount',
-                    status: { const: 'PROCESSED' }
+                    amount: 'amount'
                   }
                 }
               ]
@@ -53,7 +51,7 @@ describe('scenario runtime', () => {
           id: 'target',
           queue: 'queue-target',
           events: [
-            { name: 'FollowUp', payloadSchema: { orderId: 'string', amount: 'number', status: 'string' } }
+            { name: 'FollowUp', payloadSchema: { orderId: 'string', amount: 'number' } }
           ],
           listeners: []
         }
@@ -105,26 +103,15 @@ describe('scenario runtime', () => {
     expect(emitted.envelope.traceId).toBe(initialEnvelope.traceId);
     expect(emitted.envelope.data).toEqual({
       orderId: 'ORD-1',
-      amount: 42,
-      status: 'PROCESSED'
+      amount: 42
     });
 
     const elapsed = emitted.timestamp - startTime;
     expect(elapsed).toBeGreaterThanOrEqual(50);
 
-    await vi.waitFor(() => {
-      const snapshot = runtime.getStateSnapshot();
-      expect(snapshot[correlationId]?.source).toBe('PROCESSED');
-    }, { timeout: 1000 });
-
     await runtime.stop();
     await runtime.stop();
 
-    const snapshot = runtime.getStateSnapshot();
-    expect(snapshot).toEqual({
-      [correlationId]: {
-        source: 'PROCESSED'
-      }
-    });
+    expect(runtime.getStateSnapshot()).toEqual({});
   });
 });

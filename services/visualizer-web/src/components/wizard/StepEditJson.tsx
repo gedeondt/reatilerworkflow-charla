@@ -52,6 +52,9 @@ function buildMermaid(scenario: any): string {
   const eventToDomain = new Map<string, string>();
   const eventToConsumer = new Map<string, string>();
   const seen = new Set<string>();
+  let startEventName: string | null = null;
+  let startOwner: string | null = null;
+  let endPlaceholder: string | null = null;
 
   domains.forEach((domain: any, index: number) => {
     if (!isRecord(domain)) {
@@ -72,6 +75,10 @@ function buildMermaid(scenario: any): string {
         const eventName = asString(event.name);
         if (eventName) {
           eventToDomain.set(eventName, domainId);
+          if (event.start === true && !startEventName) {
+            startEventName = eventName;
+            startOwner = domainId;
+          }
         }
       }
     });
@@ -96,6 +103,29 @@ function buildMermaid(scenario: any): string {
       }
     });
   });
+
+  if (startOwner && startEventName && endPlaceholder) {
+    eventToDomain.forEach((ownerDomain, eventName) => {
+      if (eventToConsumer.has(eventName)) {
+        return;
+      }
+
+      const key = `${ownerDomain}->${endPlaceholder}:${eventName}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        lines.push(`${ownerDomain}-->>${endPlaceholder}: ${eventName}`);
+      }
+    });
+  }
+
+  if (startEventName && startOwner) {
+    const startId = "start_node";
+    const endId = "end_node";
+    lines.push(`participant ${startId}`);
+    lines.push(`participant ${endId}`);
+    lines.push(`${startId}-->>${startOwner}: ${startEventName}`);
+    endPlaceholder = endId;
+  }
 
   domains.forEach((domain: any, index: number) => {
     if (!isRecord(domain)) {
@@ -124,6 +154,9 @@ function buildMermaid(scenario: any): string {
         }
       }
 
+      const actions = Array.isArray(listener.actions) ? listener.actions : [];
+      const hasEmits = actions.some((action: any) => isRecord(action) && action.type === "emit");
+
       actions.forEach((action: any) => {
         if (!isRecord(action)) {
           return;
@@ -135,20 +168,26 @@ function buildMermaid(scenario: any): string {
             return;
           }
 
+          const consumer = eventToConsumer.get(eventName);
           const targetDomain =
-            eventToConsumer.get(eventName) ?? eventToDomain.get(eventName) ?? asString(action.toDomain) ?? domainId;
+            consumer ??
+            (endPlaceholder ?? domainId);
 
           const key = `${domainId}->${targetDomain}:${eventName}`;
           if (!seen.has(key)) {
             seen.add(key);
             lines.push(`${domainId}->>${targetDomain}: ${eventName}`);
           }
-        } else if (action.type === "set-state") {
-          const status = asString(action.status);
-          const label = status ? `set-state ${status}` : "set-state";
-          lines.push(`${domainId}-->>${domainId}: ${label}`);
         }
       });
+
+      if (startOwner && startEventName && !hasEmits && triggeringEventName && endPlaceholder) {
+        const key = `${domainId}->${endPlaceholder}:${triggeringEventName}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          lines.push(`${domainId}-->>${endPlaceholder}: ${triggeringEventName}`);
+        }
+      }
     });
   });
 

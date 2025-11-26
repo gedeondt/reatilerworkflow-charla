@@ -40,10 +40,6 @@
           "on": { "event": "EmployeeHired" },
           "actions": [
             {
-              "type": "set-state",
-              "status": "HIRED"
-            },
-            {
               "type": "emit",
               "event": "EmployeeCreated",
               "mapping": {
@@ -60,10 +56,6 @@
           "delayMs": 80,
           "on": { "event": "AccessGranted", "fromDomain": "security" },
           "actions": [
-            {
-              "type": "set-state",
-              "status": "ACTIVE"
-            },
             {
               "type": "emit",
               "event": "EmployeeActivated",
@@ -96,10 +88,6 @@
           "delayMs": 120,
           "on": { "event": "EmployeeCreated", "fromDomain": "hr" },
           "actions": [
-            {
-              "type": "set-state",
-              "status": "ACCOUNT_CREATED"
-            },
             {
               "type": "emit",
               "event": "PayrollAccountCreated",
@@ -134,10 +122,6 @@
           "on": { "event": "PayrollAccountCreated", "fromDomain": "payroll" },
           "actions": [
             {
-              "type": "set-state",
-              "status": "ACCOUNT_CREATED"
-            },
-            {
               "type": "emit",
               "event": "ITAccountCreated",
               "mapping": {
@@ -171,10 +155,6 @@
           "on": { "event": "ITAccountCreated", "fromDomain": "it" },
           "actions": [
             {
-              "type": "set-state",
-              "status": "READY"
-            },
-            {
               "type": "emit",
               "event": "FacilitiesReady",
               "mapping": {
@@ -206,10 +186,6 @@
           "delayMs": 150,
           "on": { "event": "FacilitiesReady", "fromDomain": "facilities" },
           "actions": [
-            {
-              "type": "set-state",
-              "status": "ACCESS_GRANTED"
-            },
             {
               "type": "emit",
               "event": "AccessGranted",

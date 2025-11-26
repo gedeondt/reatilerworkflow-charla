@@ -18,7 +18,6 @@ Cada escenario debe seguir el DSL validado por `@reatiler/saga-kernel`:
     - `delayMs` (opcional): tiempo simulado antes de procesar el evento.
     - `actions`: lista de acciones a ejecutar. Tipos soportados:
       - `emit`: publica un `event` propio del dominio (no requiere `toDomain`).
-      - `set-state`: marca el dominio propietario del listener con el `status` indicado.
 
 ### `payloadSchema`: contrato de datos de cada evento
 

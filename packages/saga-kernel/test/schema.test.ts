@@ -45,7 +45,6 @@ function createBaseScenario(): Scenario {
             id: 'on-order-created',
             on: { event: 'OrderCreated' },
             actions: [
-              { type: 'set-state', status: 'CREATED' },
               {
                 type: 'emit',
                 event: 'PaymentRequested',
@@ -192,7 +191,6 @@ describe('scenarioSchema', () => {
     if (listener) {
       listener.on.event = 'NonExistingEvent';
       listener.actions = [
-        { type: 'set-state', status: 'CREATED' },
         { type: 'emit', event: 'UnknownEvent', toDomain: 'order', mapping: {} },
         {
           type: 'emit',
@@ -233,7 +231,7 @@ describe('scenarioSchema', () => {
     scenario.domains[0].listeners?.push({
       id: 'duplicate-listener',
       on: { event: 'OrderCreated' },
-      actions: [{ type: 'set-state', status: 'DUPLICATE' }]
+      actions: []
     });
 
     const result = scenarioSchema.safeParse(scenario);

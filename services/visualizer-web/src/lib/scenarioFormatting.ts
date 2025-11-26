@@ -145,24 +145,27 @@ export function buildMermaid(scenario: Scenario): string {
     return lines.join("\n");
   }
 
-  lines.push("participant start");
+  const startId = "start_node";
+  const endId = "end_node";
+  lines.push(`participant ${startId}`);
+  lines.push(`participant ${endId}`);
 
   const visitedEvents = new Set<string>();
   let currentEventName = startEventEntry.event.name;
   let currentOwner = startEventEntry.owner;
 
-  const addSetState = (domainId: string, status?: string) => {
-    const label = status ? `set-state ${status}` : "set-state";
-    lines.push(`${domainId}-->>${domainId}: ${label}`);
-  };
-
-  lines.push(`start-->>${currentOwner}: ${currentEventName}`);
+  lines.push(`${startId}-->>${currentOwner}: ${currentEventName}`);
 
   while (currentEventName && !visitedEvents.has(currentEventName)) {
     visitedEvents.add(currentEventName);
     const consumer = eventToConsumer.get(currentEventName);
 
     if (!consumer) {
+      const endKey = `${currentOwner}->${endId}:${currentEventName}`;
+      if (!seen.has(endKey)) {
+        seen.add(endKey);
+        lines.push(`${currentOwner}-->>${endId}: ${currentEventName}`);
+      }
       break;
     }
 
@@ -178,27 +181,19 @@ export function buildMermaid(scenario: Scenario): string {
 
     let nextEvent: string | null = null;
     for (const action of listener.actions ?? []) {
-      if (action.type === "set-state") {
-        addSetState(domainId, action.status);
-        continue;
-      }
-
       if (action.type === "emit") {
         const emittedEventName = action.event;
         if (typeof emittedEventName !== "string") {
           continue;
         }
 
-        const targetDomain =
-          eventToConsumer.get(emittedEventName)?.domainId ??
-          eventToDomain.get(emittedEventName);
+        const consumer = eventToConsumer.get(emittedEventName);
+        const targetDomain = consumer?.domainId ?? endId;
 
-        if (targetDomain) {
-          const key = `${domainId}->${targetDomain}:${emittedEventName}`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            lines.push(`${domainId}->>${targetDomain}: ${emittedEventName}`);
-          }
+        const key = `${domainId}->${targetDomain}:${emittedEventName}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          lines.push(`${domainId}->>${targetDomain}: ${emittedEventName}`);
         }
 
         if (!nextEvent) {
@@ -208,6 +203,11 @@ export function buildMermaid(scenario: Scenario): string {
     }
 
     if (!nextEvent) {
+      const endKey = `${domainId}->${endId}:${currentEventName}`;
+      if (!seen.has(endKey)) {
+        seen.add(endKey);
+        lines.push(`${domainId}-->>${endId}: ${currentEventName}`);
+      }
       break;
     }
 

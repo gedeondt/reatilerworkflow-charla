@@ -432,9 +432,7 @@ describe('POST /scenario/apply', () => {
                 {
                   id: 'ventas-on-PedidoCreado',
                   on: { event: 'PedidoCreado' },
-                  actions: [
-                    { type: 'set-state', status: 'RECIBIDO' }
-                  ]
+                  actions: []
                 }
               ]
             }
@@ -460,12 +458,7 @@ describe('POST /scenario/apply', () => {
                     {
                       id: 'ventas-on-PedidoCreado',
                       on: { event: 'PedidoCreado' },
-                      actions: [
-                        {
-                          type: 'set-state',
-                          status: 'RECIBIDO'
-                        }
-                      ]
+                      actions: []
                     }
                   ]
                 }

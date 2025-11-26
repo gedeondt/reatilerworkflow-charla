@@ -66,7 +66,6 @@ Listener:
 }
 
 Acciones válidas:
-- set-state → { "type": "set-state", "status": string }
 - emit → { "type": "emit", "event": string, "mapping": Mapping }
 
 - Los nombres de eventos son globales y únicos. Los listeners viven en el dominio consumidor y reaccionan a eventos publicados por otros dominios.

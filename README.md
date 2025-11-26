@@ -124,7 +124,7 @@ También es posible iniciar cada servicio manualmente en terminales independient
 ## Flujo principal (happy path)
 
 1. Un evento inicial (por ejemplo, `OrderPlaced`) llega a la cola declarada en el escenario.
-2. Los listeners definidos en el JSON ejecutan acciones `set-state` y `emit`, encadenando la SAGA completa.【F:business/retailer-happy-path.json†L1-L78】
+2. Los listeners definidos en el JSON ejecutan acciones `emit`, encadenando la SAGA completa.【F:business/retailer-happy-path.json†L1-L78】
 3. `scenario-runner` publica cada evento en `message-queue` y espeja una versión resumida en la cola `visualizer`.
 4. `visualizer-api` normaliza esos eventos, actualiza el *state-store* y emite logs consultables.
 5. CLI o web consumen `/traces` y `/logs` para mostrar el progreso en tiempo real.

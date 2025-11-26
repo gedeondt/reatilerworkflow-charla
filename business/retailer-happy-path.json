@@ -41,10 +41,6 @@
           "on": { "event": "PaymentCaptured", "fromDomain": "payments" },
           "actions": [
             {
-              "type": "set-state",
-              "status": "CONFIRMED"
-            },
-            {
               "type": "emit",
               "event": "OrderConfirmed",
               "mapping": {
@@ -87,10 +83,6 @@
           "delayMs": 30,
           "on": { "event": "OrderPlaced", "fromDomain": "order" },
           "actions": [
-            {
-              "type": "set-state",
-              "status": "RESERVED"
-            },
             {
               "type": "emit",
               "event": "InventoryReserved",
@@ -155,10 +147,6 @@
           "on": { "event": "InventoryReserved", "fromDomain": "inventory" },
           "actions": [
             {
-              "type": "set-state",
-              "status": "AUTHORIZED"
-            },
-            {
               "type": "emit",
               "event": "PaymentAuthorized",
               "mapping": {
@@ -184,10 +172,6 @@
           "delayMs": 30,
           "on": { "event": "ShipmentPrepared", "fromDomain": "shipping" },
           "actions": [
-            {
-              "type": "set-state",
-              "status": "CAPTURED"
-            },
             {
               "type": "emit",
               "event": "PaymentCaptured",
@@ -227,10 +211,6 @@
           "delayMs": 50,
           "on": { "event": "PaymentAuthorized", "fromDomain": "payments" },
           "actions": [
-            {
-              "type": "set-state",
-              "status": "PREPARED"
-            },
             {
               "type": "emit",
               "event": "ShipmentPrepared",

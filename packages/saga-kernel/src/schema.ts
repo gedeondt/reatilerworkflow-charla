@@ -74,13 +74,6 @@ const emitMappingSchema: z.ZodType<EmitMapping> = z.record(
   z.union([scalarMappingSchema, objectMappingSchema, arrayObjectMappingSchema])
 );
 
-const setStateActionSchema = z
-  .object({
-    type: z.literal('set-state'),
-    status: z.string(),
-  })
-  .strict();
-
 const emitActionSchema = z
   .object({
     type: z.literal('emit'),
@@ -90,7 +83,7 @@ const emitActionSchema = z
   })
   .strict();
 
-const listenerActionSchema = z.discriminatedUnion('type', [setStateActionSchema, emitActionSchema]);
+const listenerActionSchema = emitActionSchema;
 
 const listenerSchema = z
   .object({
@@ -608,8 +601,7 @@ type RawDomain = z.infer<typeof domainSchema>;
 type RawScenario = z.infer<typeof scenarioSchema>;
 
 export type ListenerAction = z.infer<typeof listenerActionSchema>;
-export type SetStateAction = Extract<ListenerAction, { type: 'set-state' }>;
-export type EmitAction = Extract<ListenerAction, { type: 'emit' }>;
+export type EmitAction = ListenerAction;
 export type Listener = z.infer<typeof listenerSchema>;
 export type ScenarioEvent = Omit<RawScenarioEvent, 'payloadSchema'> & { payloadSchema: PayloadSchema };
 export type Domain = Omit<RawDomain, 'publishes' | 'events' | 'listeners'> & {

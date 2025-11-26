@@ -179,10 +179,12 @@ const extractInteractions = (
     });
   });
 
-  if (startEventName && startOwner) {
-    registerAnonymousParticipant(registry, "start");
+  const startParticipant = startEventName && startOwner ? registerAnonymousParticipant(registry, "start_node") : null;
+  const endParticipant = startEventName && startOwner ? registerAnonymousParticipant(registry, "end_node") : null;
+
+  if (startParticipant && startOwner) {
     interactions.push(
-      `start-->>${registerParticipant(registry, startOwner, startOwner).alias}: ${formatEventLabel(startEventName)}`
+      `${startParticipant.alias}-->>${registerParticipant(registry, startOwner, startOwner).alias}: ${formatEventLabel(startEventName)}`
     );
   }
 
@@ -241,10 +243,17 @@ const extractInteractions = (
           return;
         }
 
-        const targetDomain = eventConsumers.get(emittedEvent) ?? eventOwners.get(emittedEvent) ?? null;
+        const targetDomain = eventConsumers.get(emittedEvent) ?? null;
 
         if (!targetDomain) {
-          notes.push(`No se encontró el dominio para el evento "${emittedEvent}".`);
+          if (endParticipant) {
+            const consumer = registerParticipant(registry, domain.id as string, domain.id as string);
+            const key = `${consumer.alias}->${endParticipant.alias}:${emittedEvent}`;
+            if (!seenInteractions.has(key)) {
+              seenInteractions.add(key);
+              interactions.push(`${consumer.alias}-->>${endParticipant.alias}: ${formatEventLabel(emittedEvent)}`);
+            }
+          }
           return;
         }
 
@@ -259,8 +268,32 @@ const extractInteractions = (
         seenInteractions.add(key);
         interactions.push(`${source.alias}->>${target.alias}: ${formatEventLabel(emittedEvent)}`);
       });
+
+      if (endParticipant && (!listener.actions || listener.actions.every((action) => action.type !== "emit"))) {
+        const consumer = registerParticipant(registry, domain.id as string, domain.id as string);
+        const key = `${consumer.alias}->${endParticipant.alias}:${triggeringEvent}`;
+        if (!seenInteractions.has(key)) {
+          seenInteractions.add(key);
+          interactions.push(`${consumer.alias}-->>${endParticipant.alias}: ${formatEventLabel(triggeringEvent)}`);
+        }
+      }
     });
   });
+
+  if (endParticipant) {
+    eventOwners.forEach((ownerDomain, eventName) => {
+      if (eventConsumers.has(eventName)) {
+        return;
+      }
+
+      const owner = registerParticipant(registry, ownerDomain, ownerDomain);
+      const key = `${owner.alias}->${endParticipant.alias}:${eventName}`;
+      if (!seenInteractions.has(key)) {
+        seenInteractions.add(key);
+        interactions.push(`${owner.alias}-->>${endParticipant.alias}: ${formatEventLabel(eventName)}`);
+      }
+    });
+  }
 
   return { interactions, notes };
 };

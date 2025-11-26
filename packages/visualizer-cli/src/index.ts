@@ -651,27 +651,12 @@ function createScenarioContext(scenario: Scenario, domains: Domain[]): ScenarioC
     queueToDomainId[domain.queue] = domain.id;
   }
 
-  const eventStateUpdates: Record<string, DomainStatusUpdate[]> = {};
-
   const eventOwners = new Map<string, string>();
+  const eventStateUpdates: Record<string, DomainStatusUpdate[]> = {};
 
   for (const domain of scenario.domains) {
     for (const event of getDomainEvents(domain)) {
       eventOwners.set(event.name, domain.id);
-    }
-  }
-
-  for (const domain of scenario.domains) {
-    for (const listener of domain.listeners ?? []) {
-      for (const action of listener.actions) {
-        if (action.type !== 'set-state') {
-          continue;
-        }
-
-        const updates = eventStateUpdates[listener.on.event] ?? [];
-        updates.push({ domainId: domain.id, status: action.status });
-        eventStateUpdates[listener.on.event] = updates;
-      }
     }
   }
 
